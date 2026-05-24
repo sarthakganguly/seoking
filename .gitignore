@@ -1,0 +1,52 @@
+# Python-specific files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environment / Secrets configuration
+.env
+.venv
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# SQLite Database & Local Data Persistence
+# Protects SQLite database files from being committed to Git
+data/
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+
+# VS Code workspace files (from Windows client)
+.vscode/
+*.code-workspace
+.history/
+
+# Windows OS specific system files (Windows client)
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/

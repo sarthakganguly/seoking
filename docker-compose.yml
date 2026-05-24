@@ -1,0 +1,14 @@
+services:
+  seoking:
+    build: .
+    container_name: seoking_app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "8081:8081"
+    volumes:
+      - ./data:/app/data
+      - ./app:/app/app
+    environment:
+      - DATABASE_URL=/app/data/seoking.db
+      - ENVIRONMENT=development

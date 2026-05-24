@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEO King - Local SEO Dashboard</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+    <!-- ================= AUTH CONTAINER ================= -->
+    <div id="auth-container" class="hidden">
+        <div class="auth-card">
+            <div class="auth-logo">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="url(#brand-grad)" stroke="url(#brand-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 17L12 22L22 17" stroke="url(#brand-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 12L12 17L22 12" stroke="url(#brand-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <defs>
+                        <linearGradient id="brand-grad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#8b5cf6"/>
+                            <stop offset="1" stop-color="#6366f1"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <h1>SEO King</h1>
+                <p>Local-First SEO & Optimization Platform</p>
+            </div>
+
+            <!-- Login View -->
+            <form id="login-form" class="auth-view">
+                <h2>Welcome Back</h2>
+                <div class="form-group">
+                    <label for="login-username">Username</label>
+                    <input type="text" id="login-username" required placeholder="Enter username">
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" required placeholder="Enter password">
+                </div>
+                <button type="submit" class="btn btn-primary">Login</button>
+                <div class="auth-footer">
+                    <a href="#" id="go-to-recover">Forgot Password?</a>
+                </div>
+            </form>
+
+            <!-- Register View -->
+            <form id="register-form" class="auth-view hidden">
+                <h2>Create Account</h2>
+                <div class="form-group">
+                    <label for="register-username">Username</label>
+                    <input type="text" id="register-username" required placeholder="Create username">
+                </div>
+                <div class="form-group">
+                    <label for="register-password">Password</label>
+                    <input type="password" id="register-password" required placeholder="Create password">
+                </div>
+                <button type="submit" class="btn btn-primary">Sign Up</button>
+            </form>
+
+            <!-- Recovery Code Show View -->
+            <div id="recovery-code-view" class="auth-view hidden">
+                <h2>Account Created!</h2>
+                <p class="warning-text">Write down your recovery code. If you forget your password, this is the only way to recover your account.</p>
+                <div class="code-box">
+                    <span id="recovery-code-display">XXXX-XXXX-XXXX-XXXX</span>
+                    <button class="btn btn-sm btn-secondary" onclick="copyRecoveryCode()">Copy</button>
+                </div>
+                <button id="recovery-done-btn" class="btn btn-primary">I Have Saved It</button>
+            </div>
+
+            <!-- Reset Password View -->
+            <form id="recover-form" class="auth-view hidden">
+                <h2>Recover Account</h2>
+                <div class="form-group">
+                    <label for="recover-username">Username</label>
+                    <input type="text" id="recover-username" required placeholder="Enter username">
+                </div>
+                <div class="form-group">
+                    <label for="recover-code">Recovery Code</label>
+                    <input type="text" id="recover-code" required placeholder="Enter recovery code">
+                </div>
+                <div class="form-group">
+                    <label for="recover-new-password">New Password</label>
+                    <input type="password" id="recover-new-password" required placeholder="Enter new password">
+                </div>
+                <button type="submit" class="btn btn-primary">Reset Password</button>
+                <div class="auth-footer">
+                    <a href="#" id="back-to-login">Back to Login</a>
+                </div>
+            </form>
+
+            <div id="auth-error" class="error-banner hidden"></div>
+        </div>
+    </div>
+
+
+    <!-- ================= APP CONTAINER ================= -->
+    <div id="app-container" class="hidden">
+        
+        <!-- SIDEBAR NAVIGATION -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="#8b5cf6" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 17L12 22L22 17" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 12L12 17L22 12" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>SEO King</span>
+            </div>
+            
+            <nav class="sidebar-menu">
+                <a href="#" class="menu-item active" data-target="dashboard">
+                    <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+                    Dashboard
+                </a>
+                <a href="#" class="menu-item" data-target="audit">
+                    <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>
+                    Site Audit
+                </a>
+                <a href="#" class="menu-item" data-target="optimizer">
+                    <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+                    Content Optimizer
+                </a>
+                <a href="#" class="menu-item" data-target="tracker">
+                    <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    Rank Tracker
+                </a>
+                <a href="#" class="menu-item" data-target="settings">
+                    <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    Settings
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="user-badge">
+                    <span class="user-avatar" id="user-avatar-initials">U</span>
+                    <div class="user-info">
+                        <span class="username" id="user-display-name">Username</span>
+                        <span class="role">Operator</span>
+                    </div>
+                </div>
+                <button id="logout-btn" class="btn-logout" title="Logout">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                </button>
+            </div>
+        </aside>
+
+        <!-- MAIN WORKSPACE -->
+        <main class="workspace">
+            <header class="workspace-header">
+                <div class="breadcrumb">
+                    <span id="breadcrumb-parent">Workspace</span>
+                    <span class="divider">/</span>
+                    <span id="breadcrumb-current" class="active">Dashboard</span>
+                </div>
+                <div class="header-actions">
+                    <!-- Quick Connection Status -->
+                    <div id="ws-status" class="status-indicator disconnected">
+                        <span class="dot"></span>
+                        <span class="text">Disconnected</span>
+                    </div>
+                    <!-- Theme Toggle -->
+                    <button id="theme-toggle-btn" class="btn-icon" title="Toggle Theme">
+                        <svg class="sun-icon hidden" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                        <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                    </button>
+                </div>
+            </header>
+
+            <div class="workspace-body">
+                
+                <!-- 1. DASHBOARD VIEW -->
+                <section id="view-dashboard" class="app-view">
+                    <div class="dashboard-hero">
+                        <h1>SEO King Control Panel</h1>
+                        <p>Evaluate search performance, index status, and content semantics locally.</p>
+                    </div>
+
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <span class="metric-title">Tracked Keywords</span>
+                            <span class="metric-value" id="dash-keywords-count">0</span>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-title">Average Position</span>
+                            <span class="metric-value" id="dash-avg-position">--</span>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-title">Audit Pages Crawled</span>
+                            <span class="metric-value" id="dash-pages-crawled">0</span>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-title">Crawled Health</span>
+                            <span class="metric-value text-success" id="dash-site-health">--</span>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-sections">
+                        <div class="card card-wide">
+                            <h2>Recent Site Audits</h2>
+                            <div class="table-container">
+                                <table id="dash-audits-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Domain</th>
+                                            <th>Status</th>
+                                            <th>URLs Crawled</th>
+                                            <th>Started At</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td colspan="5" class="empty-state">No audits run yet.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="card card-wide">
+                            <h2>Keyword Performance Summary</h2>
+                            <div class="table-container">
+                                <table id="dash-keywords-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Keyword</th>
+                                            <th>Target Domain</th>
+                                            <th>Current Rank</th>
+                                            <th>Checked At</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td colspan="4" class="empty-state">No keywords tracked yet.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 2. SITE AUDIT VIEW -->
+                <section id="view-audit" class="app-view hidden">
+                    <div class="view-header-row">
+                        <div>
+                            <h1>Technical Site Audit</h1>
+                            <p>Deep scan domains for broken paths, header compliance, and metadata compliance.</p>
+                        </div>
+                        <button class="btn btn-primary" onclick="openNewAuditModal()">New Site Audit</button>
+                    </div>
+
+                    <div class="card">
+                        <h2>Audit Execution History</h2>
+                        <div class="table-container">
+                            <table id="audit-runs-table">
+                                <thead>
+                                    <tr>
+                                        <th>Domain</th>
+                                        <th>Status</th>
+                                        <th>URLs Crawled</th>
+                                        <th>Started</th>
+                                        <th>Completed</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td colspan="6" class="empty-state">No audits executed. Click 'New Site Audit' to start.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Audit Detail View -->
+                    <div id="audit-detail-container" class="card hidden">
+                        <div class="detail-header">
+                            <div>
+                                <h2 id="audit-detail-domain">domain.com</h2>
+                                <span id="audit-detail-status" class="badge">completed</span>
+                            </div>
+                            <div class="detail-actions">
+                                <button class="btn btn-sm btn-secondary" onclick="exportAuditCSV()">Download CSV</button>
+                                <button class="btn btn-sm btn-danger" id="cancel-run-btn">Cancel Audit</button>
+                                <button class="btn btn-sm btn-secondary" onclick="closeAuditDetails()">Back to History</button>
+                            </div>
+                        </div>
+
+                        <div class="audit-summary-metrics">
+                            <div class="sub-metric">
+                                <span class="lbl">Total Pages</span>
+                                <span class="val" id="audit-metric-total">0</span>
+                            </div>
+                            <div class="sub-metric text-danger">
+                                <span class="lbl">Broken Links (404)</span>
+                                <span class="val" id="audit-metric-broken">0</span>
+                            </div>
+                            <div class="sub-metric text-warning">
+                                <span class="lbl">Redirects</span>
+                                <span class="val" id="audit-metric-redirects">0</span>
+                            </div>
+                            <div class="sub-metric text-success">
+                                <span class="lbl">Healthy (200)</span>
+                                <span class="val" id="audit-metric-healthy">0</span>
+                            </div>
+                        </div>
+
+                        <div class="filter-bar">
+                            <input type="text" id="audit-page-search" placeholder="Filter URLs..." onkeyup="filterAuditPages()">
+                            <select id="audit-page-filter" onchange="filterAuditPages()">
+                                <option value="all">All Pages</option>
+                                <option value="broken">Broken Only (404)</option>
+                                <option value="redirect">Redirects Only (3xx)</option>
+                                <option value="missing-meta">Missing Title/Meta Desc</option>
+                            </select>
+                        </div>
+
+                        <div class="table-container">
+                            <table id="audit-pages-table">
+                                <thead>
+                                    <tr>
+                                        <th>URL</th>
+                                        <th>Status</th>
+                                        <th>Title Tag</th>
+                                        <th>Meta Description</th>
+                                        <th>H1 Tag</th>
+                                        <th>Redirect URL</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Rendered dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 3. CONTENT OPTIMIZER VIEW -->
+                <section id="view-optimizer" class="app-view hidden">
+                    <div class="view-header-row">
+                        <div>
+                            <h1>Semantic Content Optimizer</h1>
+                            <p>Scrape real-time SERPs and check your drafts against competitor keyword lists.</p>
+                        </div>
+                    </div>
+
+                    <div id="optimizer-setup" class="card">
+                        <h2>Start Content Optimization</h2>
+                        <p>Input a keyword. We will scrape the top 10 rankings on Google and run a local NLP TF-IDF/Entity Extraction analysis to list recommendations.</p>
+                        <form id="optimizer-form" class="horizontal-form">
+                            <input type="text" id="opt-keyword" placeholder="e.g. local seo optimization" required>
+                            <button type="submit" class="btn btn-primary" id="opt-submit-btn">Run Semantic Scan</button>
+                        </form>
+                        <div id="opt-loading" class="hidden">
+                            <div class="spinner"></div>
+                            <span class="loading-text">Google query executing. Crawling competitor pages... (This may take up to a minute)</span>
+                        </div>
+                    </div>
+
+                    <!-- Optimizer Workspace (Split Panel) -->
+                    <div id="optimizer-workspace" class="optimizer-layout hidden">
+                        <!-- Left pane: WYSIWYG editor -->
+                        <div class="editor-pane card">
+                            <div class="editor-header">
+                                <h2>Your Article Draft</h2>
+                                <div class="word-count-badge"><span id="editor-word-count">0</span> words</div>
+                            </div>
+                            <textarea id="opt-text-editor" placeholder="Start writing or paste your article draft here..." onkeyup="analyzeDraftText()"></textarea>
+                        </div>
+
+                        <!-- Right pane: Entity Checklist & Metrics -->
+                        <div class="checklist-pane card">
+                            <h2>Optimization Recommendations</h2>
+                            
+                            <div class="score-card">
+                                <span class="score-label">Content Score</span>
+                                <div class="score-radial">
+                                    <span id="opt-score">0</span><span class="max-score">/100</span>
+                                </div>
+                                <span class="score-subtext" id="opt-score-desc">Start adding target keyphrases below to improve your SEO rank.</span>
+                            </div>
+
+                            <div class="entities-section">
+                                <h3>Target Keyphrases</h3>
+                                <div class="entity-chips" id="recommended-entities-list">
+                                    <!-- Loaded dynamically -->
+                                </div>
+                            </div>
+
+                            <div class="competitors-section">
+                                <h3>Analyzed Competitors</h3>
+                                <ul id="opt-competitors-list" class="competitor-list">
+                                    <!-- Loaded dynamically -->
+                                </ul>
+                            </div>
+                            
+                            <button class="btn btn-secondary w-full" onclick="closeOptimizerWorkspace()">Optimize Another Keyword</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 4. RANK TRACKER VIEW -->
+                <section id="view-tracker" class="app-view hidden">
+                    <div class="view-header-row">
+                        <div>
+                            <h1>Targeted Keyword Tracker</h1>
+                            <p>Monitor organic rank performance on daily intervals without expensive external API connections.</p>
+                        </div>
+                        <div class="btn-group">
+                            <button class="btn btn-secondary" onclick="triggerRankChecks()" id="trigger-ranks-btn">Check Ranks Now</button>
+                            <button class="btn btn-primary" onclick="openNewKeywordModal()">Track Keyword</button>
+                        </div>
+                    </div>
+
+                    <div id="tracker-running-indicator" class="info-alert hidden">
+                        <div class="spinner spinner-sm"></div>
+                        <span>A rank checking scrape is running in the background. Refresh page periodically.</span>
+                    </div>
+
+                    <div class="card">
+                        <div class="table-title-row">
+                            <h2>Tracked Keywords</h2>
+                            <button class="btn btn-sm btn-secondary" onclick="exportKeywordsCSV()">Download CSV</button>
+                        </div>
+                        <div class="table-container">
+                            <table id="tracker-keywords-table">
+                                <thead>
+                                    <tr>
+                                        <th>Keyword</th>
+                                        <th>Target Domain</th>
+                                        <th>Geo / Locale</th>
+                                        <th>Current Rank</th>
+                                        <th>Ranking URL</th>
+                                        <th>Last Checked</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td colspan="7" class="empty-state">No tracked keywords. Add one to start monitoring rankings.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Keyword Historical Graph -->
+                    <div id="keyword-history-container" class="card hidden">
+                        <div class="detail-header">
+                            <div>
+                                <h2 id="history-keyword-title">Keyword Position History</h2>
+                                <p id="history-keyword-subtitle">domain.com</p>
+                            </div>
+                            <button class="btn btn-sm btn-secondary" onclick="closeKeywordHistory()">Close History</button>
+                        </div>
+                        <div class="graph-wrapper" id="history-chart-wrapper">
+                            <!-- SVG Rendered Chart -->
+                            <svg id="history-svg-chart" width="100%" height="300" viewBox="0 0 800 300"></svg>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 5. SETTINGS VIEW -->
+                <section id="view-settings" class="app-view hidden">
+                    <div class="view-header-row">
+                        <div>
+                            <h1>System Configuration</h1>
+                            <p>Manage application hardware resource limits, scraper delays, and Geolocation settings.</p>
+                        </div>
+                    </div>
+
+                    <form id="settings-form" class="settings-grid">
+                        <!-- Core Preferences -->
+                        <div class="card">
+                            <h2>User Preferences</h2>
+                            <div class="form-group">
+                                <label for="pref-theme">Interface Theme</label>
+                                <select id="pref-theme">
+                                    <option value="dark">Dark Theme (Premium Slate)</option>
+                                    <option value="light">Light Theme (Clean White)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Scraper Limits -->
+                        <div class="card">
+                            <h2>Scraping Logistics</h2>
+                            <div class="form-group">
+                                <label for="pref-max-browser">Max Concurrent Browser Tabs (Content Optimizer)</label>
+                                <input type="number" id="pref-max-browser" min="1" max="5">
+                                <span class="help-text">Controls RAM consumption. Default: 3. Max: 5.</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="pref-max-crawler">Max Concurrent Crawler Connections (Site Audit)</label>
+                                <input type="number" id="pref-max-crawler" min="1" max="5">
+                                <span class="help-text">Controls crawler depth connection limits.</span>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="pref-jitter-min">Jitter Min Delay (ms)</label>
+                                    <input type="number" id="pref-jitter-min" min="1000">
+                                </div>
+                                <div class="form-group">
+                                    <label for="pref-jitter-max">Jitter Max Delay (ms)</label>
+                                    <input type="number" id="pref-jitter-max" min="1000">
+                                </div>
+                            </div>
+                            <span class="help-text">Introduces random pause delays between automated scraping requests to mimic human user behavior.</span>
+                        </div>
+
+                        <!-- Geolocation Settings -->
+                        <div class="card">
+                            <h2>Geotargeting Spoofing</h2>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="pref-geo-lat">Latitude</label>
+                                    <input type="text" id="pref-geo-lat">
+                                </div>
+                                <div class="form-group">
+                                    <label for="pref-geo-lon">Longitude</label>
+                                    <input type="text" id="pref-geo-lon">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="pref-locale">Locale</label>
+                                    <input type="text" id="pref-locale" placeholder="en-US">
+                                </div>
+                                <div class="form-group">
+                                    <label for="pref-timezone">Timezone ID</label>
+                                    <input type="text" id="pref-timezone" placeholder="America/Los_Angeles">
+                                </div>
+                            </div>
+                            <span class="help-text">Natively injects browser location contexts to fetch highly targeted localized Google SERPs.</span>
+                        </div>
+
+                        <div class="settings-actions">
+                            <button type="submit" class="btn btn-primary" id="save-settings-btn">Save Configurations</button>
+                            <span id="settings-status-msg" class="success-text hidden">Settings updated successfully!</span>
+                        </div>
+                    </form>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+
+    <!-- ================= MODALS & POPUPS ================= -->
+
+    <!-- New Site Audit Modal -->
+    <div id="modal-audit" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>New Technical Site Audit</h2>
+                <button class="btn-close" onclick="closeModal('modal-audit')">&times;</button>
+            </div>
+            <form id="audit-start-form">
+                <div class="form-group">
+                    <label for="audit-domain">Domain to Audit</label>
+                    <input type="text" id="audit-domain" required placeholder="e.g. example.com">
+                </div>
+                <div class="form-group">
+                    <label for="audit-depth">Crawl Depth Limit</label>
+                    <select id="audit-depth">
+                        <option value="1">1 (Seed Page Only)</option>
+                        <option value="2" selected>2 (Seed + 1st Level Links)</option>
+                        <option value="3">3 (Deep Audit)</option>
+                        <option value="4">4 (Extensive)</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary w-full">Start Scan</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Track Keyword Modal -->
+    <div id="modal-keyword" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Track Keyword Position</h2>
+                <button class="btn-close" onclick="closeModal('modal-keyword')">&times;</button>
+            </div>
+            <form id="keyword-add-form">
+                <div class="form-group">
+                    <label for="track-keyword">Keyword Search Query</label>
+                    <input type="text" id="track-keyword" required placeholder="e.g. best restaurant near me">
+                </div>
+                <div class="form-group">
+                    <label for="track-domain">Target Domain</label>
+                    <input type="text" id="track-domain" required placeholder="e.g. myrestaurant.com">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="track-geo">Geolocation / Locale</label>
+                        <input type="text" id="track-geo" value="en-US" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="track-lang">Language code</label>
+                        <input type="text" id="track-lang" value="en" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary w-full">Add Keyword</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- CAPTCHA Resolution Overlay (VNC iframe) -->
+    <div id="captcha-modal" class="modal hidden no-dismiss">
+        <div class="modal-content modal-vnc">
+            <div class="modal-header">
+                <h2>Google Security CAPTCHA Detected!</h2>
+                <span class="warning-text">Google block triggered. Please solve the captcha puzzle inside the browser frame below to resume scraping.</span>
+            </div>
+            <div class="vnc-frame-container">
+                <iframe id="vnc-iframe" src=""></iframe>
+            </div>
+            <div class="modal-footer">
+                <p>The system will automatically detect when you solve it and navigate away. Or, click below if you have successfully resolved the block.</p>
+                <button class="btn btn-primary" onclick="forceResolveCaptcha()">I Have Solved It</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
