@@ -121,6 +121,7 @@ function setupEventListeners() {
     document.getElementById("keyword-add-form").addEventListener("submit", handleAddKeyword);
     document.getElementById("optimizer-form").addEventListener("submit", handleOptimizerScan);
     document.getElementById("settings-form").addEventListener("submit", handleSaveSettings);
+    document.getElementById("performance-start-form").addEventListener("submit", handleStartPerformanceAudit);
     
     // Audit cancellation button
     document.getElementById("cancel-run-btn").addEventListener("click", handleCancelAudit);
@@ -225,6 +226,11 @@ function switchView(viewName) {
         }
     });
 
+    // Stop performance polling if leaving the performance view
+    if (viewName !== "performance") {
+        stopPerformancePolling();
+    }
+
     // Hide all view panes and show target
     document.querySelectorAll(".app-view").forEach(view => view.classList.add("hidden"));
     document.getElementById(`view-${viewName}`).classList.remove("hidden");
@@ -234,6 +240,8 @@ function switchView(viewName) {
         loadDashboardMetrics();
     } else if (viewName === "audit") {
         loadAuditHistory();
+    } else if (viewName === "performance") {
+        loadPerformanceHistory();
     } else if (viewName === "tracker") {
         loadTrackedKeywords();
     } else if (viewName === "settings") {
@@ -1378,6 +1386,365 @@ function downloadCSVBlob(csvString, filename) {
         link.click();
         document.body.removeChild(link);
     }
+}
+
+// ----------------- MODULE 4: PERFORMANCE AUDIT -----------------
+
+let performanceInterval = null;
+let currentOpenPerformanceRunId = null;
+
+function openNewPerformanceModal() {
+    document.getElementById("perf-url").value = "https://";
+    document.getElementById("perf-strategy").value = "mobile";
+    document.getElementById("modal-performance").classList.remove("hidden");
+}
+
+async function handleStartPerformanceAudit(e) {
+    e.preventDefault();
+    const url = document.getElementById("perf-url").value;
+    const strategy = document.getElementById("perf-strategy").value;
+    
+    closeModal("modal-performance");
+    
+    try {
+        const response = await fetch("/api/performance/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url, strategy })
+        });
+        
+        if (response.ok) {
+            loadPerformanceHistory();
+            switchView("performance");
+            startPerformancePolling();
+        } else {
+            const err = await response.json();
+            alert("Error: " + err.detail);
+        }
+    } catch (e) {
+        alert("Failed to start performance audit.");
+    }
+}
+
+async function loadPerformanceHistory() {
+    try {
+        const response = await fetch("/api/performance/runs");
+        const runs = await response.json();
+        
+        const tbody = document.querySelector("#performance-runs-table tbody");
+        if (runs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="9" class="empty-state">No audits executed. Click 'New Performance Scan' to start.</td></tr>`;
+            stopPerformancePolling();
+            return;
+        }
+        
+        let hasActiveRuns = false;
+        
+        tbody.innerHTML = runs.map(r => {
+            const isActive = r.status === "pending" || r.status === "running";
+            if (isActive) hasActiveRuns = true;
+            
+            const lcp = r.lcp !== null ? `${r.lcp}s` : "--";
+            const inp = r.inp !== null ? `${r.inp}ms` : "--";
+            const cls = r.cls !== null ? r.cls : "--";
+            const ttfb = r.ttfb !== null ? `${r.ttfb}ms` : "--";
+            
+            const strategyLabel = r.strategy === "desktop" ? "Desktop" : "Mobile";
+            
+            return `
+                <tr>
+                    <td class="word-break"><strong>${r.url}</strong></td>
+                    <td><span class="badge badge-secondary">${strategyLabel}</span></td>
+                    <td><span class="badge ${getBadgeClass(r.status)}">${r.status}</span></td>
+                    <td>${lcp}</td>
+                    <td>${inp}</td>
+                    <td>${cls}</td>
+                    <td>${ttfb}</td>
+                    <td>${formatDate(r.created_at)}</td>
+                    <td>
+                        <button class="btn btn-sm btn-secondary" onclick="loadPerformanceDetails(${r.id})">Open Details</button>
+                        <button class="btn btn-sm btn-danger" onclick="deletePerformanceRun(${r.id})">Delete</button>
+                    </td>
+                </tr>
+            `;
+        }).join("");
+        
+        if (hasActiveRuns) {
+            startPerformancePolling();
+        } else {
+            stopPerformancePolling();
+        }
+        
+        // If details panel is open and running, refresh it
+        if (currentOpenPerformanceRunId !== null) {
+            const currentRun = runs.find(r => r.id === currentOpenPerformanceRunId);
+            if (currentRun && (currentRun.status === "completed" || currentRun.status === "failed")) {
+                loadPerformanceDetails(currentOpenPerformanceRunId);
+            }
+        }
+    } catch (e) {
+        console.error("Failed to load performance history:", e);
+    }
+}
+
+function startPerformancePolling() {
+    if (performanceInterval === null) {
+        performanceInterval = setInterval(loadPerformanceHistory, 3000);
+    }
+}
+
+function stopPerformancePolling() {
+    if (performanceInterval !== null) {
+        clearInterval(performanceInterval);
+        performanceInterval = null;
+    }
+}
+
+async function deletePerformanceRun(runId) {
+    if (!confirm("Delete this performance audit run?")) return;
+    try {
+        const response = await fetch(`/api/performance/run/${runId}`, { method: "DELETE" });
+        if (response.ok) {
+            if (currentOpenPerformanceRunId === runId) {
+                closePerformanceDetails();
+            }
+            loadPerformanceHistory();
+        }
+    } catch (e) {
+        alert("Failed to delete performance run.");
+    }
+}
+
+async function loadPerformanceDetails(runId) {
+    currentOpenPerformanceRunId = runId;
+    
+    try {
+        const response = await fetch(`/api/performance/run/${runId}`);
+        const run = await response.json();
+        
+        document.getElementById("performance-history-container").classList.add("hidden");
+        document.getElementById("performance-detail-container").classList.remove("hidden");
+        
+        document.getElementById("perf-detail-url").innerText = run.url;
+        document.getElementById("perf-detail-strategy-badge").innerText = run.strategy === "desktop" ? "Desktop Strategy" : "Mobile Strategy";
+        
+        const statusBadge = document.getElementById("perf-detail-status-badge");
+        statusBadge.innerText = run.status;
+        statusBadge.className = `badge ${getBadgeClass(run.status)}`;
+        
+        if (run.status === "pending" || run.status === "running") {
+            // Show loading placeholder in details
+            setGaugesLoading();
+            setSecondaryMetricsLoading();
+            return;
+        }
+        
+        if (run.status === "failed") {
+            setGaugesFailed();
+            setSecondaryMetricsFailed();
+            return;
+        }
+        
+        // Populate completed details
+        // Gauges
+        renderGaugeMetrics(run);
+        
+        // DOM Metrics
+        const details = run.details || {};
+        const domSize = run.dom_size || 0;
+        const domDepth = details.dom_depth || 0;
+        
+        document.getElementById("perf-dom-size").innerText = domSize;
+        const domSizePct = Math.min(100, (domSize / 1500) * 100);
+        const domSizeBar = document.getElementById("perf-dom-size-bar");
+        domSizeBar.style.width = `${domSizePct}%`;
+        domSizeBar.className = `dom-bar-fill ${domSize < 1500 ? 'bg-success' : 'bg-danger'}`;
+        document.getElementById("perf-dom-size-status").innerText = domSize < 1500 ? "Good: Under 1,500 target" : "Warning: Over 1,500 target nodes";
+        
+        document.getElementById("perf-dom-depth").innerText = domDepth;
+        const domDepthPct = Math.min(100, (domDepth / 32) * 100);
+        const domDepthBar = document.getElementById("perf-dom-depth-bar");
+        domDepthBar.style.width = `${domDepthPct}%`;
+        domDepthBar.className = `dom-bar-fill ${domDepth < 32 ? 'bg-success' : 'bg-danger'}`;
+        document.getElementById("perf-dom-depth-status").innerText = domDepth < 32 ? "Good: Under 32 levels target" : "Warning: Deep DOM nodes detected";
+        
+        // Image Optimization Metrics
+        const images = details.images || [];
+        const totalImgs = images.length;
+        const webpCount = images.filter(i => i.isNextGen).length;
+        const lazyCount = images.filter(i => i.hasLazy).length;
+        const dimsCount = images.filter(i => i.hasDims).length;
+        
+        const webpPct = totalImgs > 0 ? Math.round((webpCount / totalImgs) * 100) : 100;
+        const lazyPct = totalImgs > 0 ? Math.round((lazyCount / totalImgs) * 100) : 100;
+        const dimsPct = totalImgs > 0 ? Math.round((dimsCount / totalImgs) * 100) : 100;
+        
+        document.getElementById("img-total-checked").innerText = totalImgs;
+        
+        const pctWebpEl = document.getElementById("img-pct-webp");
+        pctWebpEl.innerText = `${webpPct}%`;
+        pctWebpEl.className = webpPct >= 80 ? "text-success" : (webpPct >= 50 ? "text-warning" : "text-danger");
+        
+        const pctLazyEl = document.getElementById("img-pct-lazy");
+        pctLazyEl.innerText = `${lazyPct}%`;
+        pctLazyEl.className = lazyPct >= 80 ? "text-success" : (lazyPct >= 50 ? "text-warning" : "text-danger");
+        
+        const pctDimsEl = document.getElementById("img-pct-dimensions");
+        pctDimsEl.innerText = `${dimsPct}%`;
+        pctDimsEl.className = dimsPct >= 80 ? "text-success" : (dimsPct >= 50 ? "text-warning" : "text-danger");
+        
+        // Image warnings list
+        const warningsList = document.getElementById("img-warnings-list");
+        const warningImages = [];
+        
+        images.forEach(img => {
+            let issues = [];
+            if (!img.isNextGen) issues.push("Non-nextgen format");
+            if (!img.hasLazy) issues.push("Missing lazy-loading");
+            if (!img.hasDims) issues.push("Missing explicit dimensions");
+            
+            if (issues.length > 0) {
+                warningImages.push(`<li><strong>${img.src}</strong>: ${issues.join(", ")}</li>`);
+            }
+        });
+        
+        if (warningImages.length === 0) {
+            warningsList.innerHTML = `<li style="border-left-color: var(--success-color)">No optimization issues found. All images follow best practices!</li>`;
+        } else {
+            warningsList.innerHTML = warningImages.join("");
+        }
+        
+        // Caching & CDN Summary
+        const cdnVendor = details.cdn_detection || "None";
+        const cacheSummary = details.caching_summary || {};
+        const cacheRatio = cacheSummary.cached_percentage !== undefined ? `${cacheSummary.cached_percentage}%` : "0%";
+        
+        const cdnVendorEl = document.getElementById("caching-cdn-vendor");
+        cdnVendorEl.innerText = cdnVendor;
+        cdnVendorEl.className = `badge ${cdnVendor !== "None" && cdnVendor !== "No CDN detected" ? 'badge-success' : 'badge-secondary'}`;
+        
+        const cachingRatioEl = document.getElementById("caching-ratio");
+        cachingRatioEl.innerText = cacheRatio;
+        const cacheRatioVal = cacheSummary.cached_percentage || 0;
+        cachingRatioEl.className = `val ${cacheRatioVal >= 60 ? 'text-success' : (cacheRatioVal >= 30 ? 'text-warning' : 'text-danger')}`;
+        
+        // Asset headers table
+        const assets = details.assets_details || [];
+        const cachingTableBody = document.querySelector("#caching-assets-table tbody");
+        if (assets.length === 0) {
+            cachingTableBody.innerHTML = `<tr><td colspan="4" class="empty-state">No static assets detected during run.</td></tr>`;
+        } else {
+            cachingTableBody.innerHTML = assets.map(a => `
+                <tr>
+                    <td class="word-break">${a.url}</td>
+                    <td><span class="badge badge-secondary">${a.type.toUpperCase()}</span></td>
+                    <td><code>${a.cache_control || "N/A"}</code></td>
+                    <td>
+                        <span class="badge ${a.is_cdn ? 'badge-success' : 'badge-secondary'}">${a.is_cdn ? 'CDN Served' : 'Direct Server'}</span>
+                        <span class="badge ${a.is_cached ? 'badge-success' : 'badge-danger'}">${a.is_cached ? 'Cached' : 'Uncached'}</span>
+                    </td>
+                </tr>
+            `).join("");
+        }
+    } catch (e) {
+        console.error("Failed to load performance details:", e);
+    }
+}
+
+function renderGaugeMetrics(run) {
+    // LCP
+    let lcpVal = run.lcp;
+    let lcpColor = "success";
+    let lcpStatus = "Good";
+    let lcpPct = Math.max(0, Math.min(1, (10 - lcpVal) / 10));
+    if (lcpVal > 4.0) { lcpColor = "danger"; lcpStatus = "Poor"; }
+    else if (lcpVal > 2.5) { lcpColor = "warning"; lcpStatus = "Needs Improvement"; }
+    updateGauge("lcp", `${lcpVal}s`, lcpStatus, lcpColor, lcpPct);
+    
+    // INP
+    let inpVal = run.inp;
+    let inpColor = "success";
+    let inpStatus = "Good";
+    let inpPct = Math.max(0, Math.min(1, (1000 - inpVal) / 1000));
+    if (inpVal > 500) { inpColor = "danger"; inpStatus = "Poor"; }
+    else if (inpVal > 200) { inpColor = "warning"; inpStatus = "Needs Improvement"; }
+    updateGauge("inp", `${inpVal}ms`, inpStatus, inpColor, inpPct);
+    
+    // CLS
+    let clsVal = run.cls;
+    let clsColor = "success";
+    let clsStatus = "Good";
+    let clsPct = Math.max(0, Math.min(1, (1.0 - clsVal) / 1.0));
+    if (clsVal > 0.25) { clsColor = "danger"; clsStatus = "Poor"; }
+    else if (clsVal > 0.1) { clsColor = "warning"; clsStatus = "Needs Improvement"; }
+    updateGauge("cls", `${clsVal}`, clsStatus, clsColor, clsPct);
+    
+    // TTFB
+    let ttfbVal = run.ttfb;
+    let ttfbColor = "success";
+    let ttfbStatus = "Good";
+    let ttfbPct = Math.max(0, Math.min(1, (3000 - ttfbVal) / 3000));
+    if (ttfbVal > 1500) { ttfbColor = "danger"; ttfbStatus = "Poor"; }
+    else if (ttfbVal > 600) { ttfbColor = "warning"; ttfbStatus = "Needs Improvement"; }
+    updateGauge("ttfb", `${ttfbVal}ms`, ttfbStatus, ttfbColor, ttfbPct);
+}
+
+function updateGauge(metric, val, status, colorClass, pct) {
+    const circle = document.getElementById(`gauge-${metric}-circle`);
+    const valText = document.getElementById(`gauge-${metric}-value`);
+    const statusText = document.getElementById(`gauge-${metric}-status`);
+    const card = document.getElementById(`gauge-${metric}-card`);
+    
+    valText.innerText = val;
+    statusText.innerText = status;
+    
+    statusText.className = `gauge-badge badge badge-${colorClass}`;
+    card.className = `gauge-card border-${colorClass}`;
+    
+    const circum = 251.2;
+    const offset = circum - (pct * circum);
+    circle.setAttribute("stroke-dashoffset", offset);
+    circle.className.baseVal = `gauge-value-circle stroke-${colorClass}`;
+}
+
+function setGaugesLoading() {
+    const metrics = ["lcp", "inp", "cls", "ttfb"];
+    metrics.forEach(m => {
+        updateGauge(m, "Testing...", "Running", "warning", 0.5);
+    });
+}
+
+function setGaugesFailed() {
+    const metrics = ["lcp", "inp", "cls", "ttfb"];
+    metrics.forEach(m => {
+        updateGauge(m, "Error", "Failed", "danger", 0);
+    });
+}
+
+function setSecondaryMetricsLoading() {
+    document.getElementById("perf-dom-size").innerText = "Analyzing...";
+    document.getElementById("perf-dom-depth").innerText = "Analyzing...";
+    document.getElementById("img-total-checked").innerText = "0";
+    document.getElementById("img-pct-webp").innerText = "--";
+    document.getElementById("img-pct-lazy").innerText = "--";
+    document.getElementById("img-pct-dimensions").innerText = "--";
+    document.getElementById("img-warnings-list").innerHTML = "<li>Audit in progress... Please wait.</li>";
+    document.getElementById("caching-cdn-vendor").innerText = "Checking...";
+    document.getElementById("caching-ratio").innerText = "--";
+    document.querySelector("#caching-assets-table tbody").innerHTML = `<tr><td colspan="4" class="empty-state">Audit running. Waiting for assets data...</td></tr>`;
+}
+
+function setSecondaryMetricsFailed() {
+    document.getElementById("perf-dom-size").innerText = "Failed";
+    document.getElementById("perf-dom-depth").innerText = "Failed";
+    document.getElementById("img-warnings-list").innerHTML = "<li style='border-left-color: var(--danger-color)'>Audit failed. Could not scrape image parameters.</li>";
+    document.querySelector("#caching-assets-table tbody").innerHTML = `<tr><td colspan="4" class="empty-state text-danger">Audit failed.</td></tr>`;
+}
+
+function closePerformanceDetails() {
+    currentOpenPerformanceRunId = null;
+    document.getElementById("performance-detail-container").classList.add("hidden");
+    document.getElementById("performance-history-container").classList.remove("hidden");
 }
 
 // ----------------- CORE UTILITY FORMATTERS -----------------

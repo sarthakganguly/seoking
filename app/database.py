@@ -110,9 +110,26 @@ def init_db():
         FOREIGN KEY(tracked_keyword_id) REFERENCES tracked_keywords(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS performance_audits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        url TEXT NOT NULL,
+        strategy TEXT DEFAULT 'mobile',
+        status TEXT DEFAULT 'pending',
+        lcp REAL,
+        inp REAL,
+        cls REAL,
+        ttfb REAL,
+        dom_size INTEGER,
+        details_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_audit_pages_run_id ON audit_pages(audit_run_id);
     CREATE INDEX IF NOT EXISTS idx_audit_runs_domain_date ON audit_runs(domain, started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_keyword_history_lookup ON keyword_rank_history(tracked_keyword_id, checked_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_perf_audits_user_date ON performance_audits(user_id, created_at DESC);
     """
 
     conn = get_db_connection()

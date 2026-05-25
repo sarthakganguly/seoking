@@ -122,6 +122,10 @@
                     <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>
                     Site Audit
                 </a>
+                <a href="#" class="menu-item" data-target="performance">
+                    <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Performance Audit
+                </a>
                 <a href="#" class="menu-item" data-target="optimizer">
                     <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
                     Content Optimizer
@@ -352,6 +356,212 @@
                             <button class="btn btn-sm btn-secondary" id="audit-pg-prev" onclick="changeAuditPage(-1)">Previous</button>
                             <span class="pagination-info" id="audit-pg-info">Page 1 of 1</span>
                             <button class="btn btn-sm btn-secondary" id="audit-pg-next" onclick="changeAuditPage(1)">Next</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 2.5 PERFORMANCE AUDIT VIEW -->
+                <section id="view-performance" class="app-view hidden">
+                    <div class="view-header-row">
+                        <div>
+                            <h1>Performance Audit</h1>
+                            <p>Test Core Web Vitals, DOM size, and asset optimization parameters locally.</p>
+                        </div>
+                        <button class="btn btn-primary" onclick="openNewPerformanceModal()">New Performance Scan</button>
+                    </div>
+
+                    <!-- Performance Runs History List -->
+                    <div id="performance-history-container" class="card">
+                        <h2>Audit Execution History</h2>
+                        <div class="table-container">
+                            <table id="performance-runs-table">
+                                <thead>
+                                    <tr>
+                                        <th>Target URL</th>
+                                        <th>Device Strategy</th>
+                                        <th>Status</th>
+                                        <th>LCP</th>
+                                        <th>INP</th>
+                                        <th>CLS</th>
+                                        <th>TTFB</th>
+                                        <th>Date</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td colspan="9" class="empty-state">No audits executed. Click 'New Performance Scan' to start.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Performance Detail View (Hidden by default) -->
+                    <div id="performance-detail-container" class="card hidden">
+                        <div class="detail-header">
+                            <div>
+                                <h2 id="perf-detail-url">url.com</h2>
+                                <span id="perf-detail-strategy-badge" class="badge">mobile</span>
+                                <span id="perf-detail-status-badge" class="badge">completed</span>
+                            </div>
+                            <div class="detail-actions">
+                                <button class="btn btn-sm btn-secondary" onclick="closePerformanceDetails()">Back to History</button>
+                            </div>
+                        </div>
+
+                        <!-- Core Web Vitals Row (4 Gauges) -->
+                        <div class="cwv-gauges-grid">
+                            <!-- LCP -->
+                            <div class="gauge-card" id="gauge-lcp-card">
+                                <div class="gauge-header">
+                                    <h3>Largest Contentful Paint (LCP)</h3>
+                                    <span class="gauge-badge badge" id="gauge-lcp-status">Good</span>
+                                </div>
+                                <div class="gauge-visual">
+                                    <svg viewBox="0 0 100 100" class="gauge-svg">
+                                        <circle cx="50" cy="50" r="40" class="gauge-bg-circle"/>
+                                        <circle cx="50" cy="50" r="40" class="gauge-value-circle" id="gauge-lcp-circle" stroke-dasharray="251.2" stroke-dashoffset="251.2"/>
+                                    </svg>
+                                    <div class="gauge-value-text" id="gauge-lcp-value">0.0s</div>
+                                </div>
+                                <div class="gauge-desc">Measures loading performance. Target: &lt; 2.5s</div>
+                            </div>
+
+                            <!-- INP -->
+                            <div class="gauge-card" id="gauge-inp-card">
+                                <div class="gauge-header">
+                                    <h3>Interaction to Next Paint (INP)</h3>
+                                    <span class="gauge-badge badge" id="gauge-inp-status">Good</span>
+                                </div>
+                                <div class="gauge-visual">
+                                    <svg viewBox="0 0 100 100" class="gauge-svg">
+                                        <circle cx="50" cy="50" r="40" class="gauge-bg-circle"/>
+                                        <circle cx="50" cy="50" r="40" class="gauge-value-circle" id="gauge-inp-circle" stroke-dasharray="251.2" stroke-dashoffset="251.2"/>
+                                    </svg>
+                                    <div class="gauge-value-text" id="gauge-inp-value">0ms</div>
+                                </div>
+                                <div class="gauge-desc">Measures responsiveness. Target: &lt; 200ms</div>
+                            </div>
+
+                            <!-- CLS -->
+                            <div class="gauge-card" id="gauge-cls-card">
+                                <div class="gauge-header">
+                                    <h3>Cumulative Layout Shift (CLS)</h3>
+                                    <span class="gauge-badge badge" id="gauge-cls-status">Good</span>
+                                </div>
+                                <div class="gauge-visual">
+                                    <svg viewBox="0 0 100 100" class="gauge-svg">
+                                        <circle cx="50" cy="50" r="40" class="gauge-bg-circle"/>
+                                        <circle cx="50" cy="50" r="40" class="gauge-value-circle" id="gauge-cls-circle" stroke-dasharray="251.2" stroke-dashoffset="251.2"/>
+                                    </svg>
+                                    <div class="gauge-value-text" id="gauge-cls-value">0.00</div>
+                                </div>
+                                <div class="gauge-desc">Measures visual stability. Target: &lt; 0.1</div>
+                            </div>
+
+                            <!-- TTFB -->
+                            <div class="gauge-card" id="gauge-ttfb-card">
+                                <div class="gauge-header">
+                                    <h3>Time to First Byte (TTFB)</h3>
+                                    <span class="gauge-badge badge" id="gauge-ttfb-status">Good</span>
+                                </div>
+                                <div class="gauge-visual">
+                                    <svg viewBox="0 0 100 100" class="gauge-svg">
+                                        <circle cx="50" cy="50" r="40" class="gauge-bg-circle"/>
+                                        <circle cx="50" cy="50" r="40" class="gauge-value-circle" id="gauge-ttfb-circle" stroke-dasharray="251.2" stroke-dashoffset="251.2"/>
+                                    </svg>
+                                    <div class="gauge-value-text" id="gauge-ttfb-value">0ms</div>
+                                </div>
+                                <div class="gauge-desc">Measures server response time. Target: &lt; 600ms</div>
+                            </div>
+                        </div>
+
+                        <!-- Secondary Metrics Grid -->
+                        <div class="perf-secondary-grid">
+                            <!-- DOM size & Depth card -->
+                            <div class="card sub-card">
+                                <h2>DOM Size & Node Depth</h2>
+                                <div class="dom-metrics-summary">
+                                    <div class="dom-metric-item">
+                                        <div class="lbl">Total DOM Nodes</div>
+                                        <div class="val" id="perf-dom-size">0</div>
+                                        <div class="dom-bar-wrapper">
+                                            <div class="dom-bar-fill" id="perf-dom-size-bar" style="width: 0%"></div>
+                                        </div>
+                                        <div class="desc" id="perf-dom-size-status">Target: &lt; 1500 nodes</div>
+                                    </div>
+                                    <div class="dom-metric-item">
+                                        <div class="lbl">Maximum DOM Depth</div>
+                                        <div class="val" id="perf-dom-depth">0</div>
+                                        <div class="dom-bar-wrapper">
+                                            <div class="dom-bar-fill" id="perf-dom-depth-bar" style="width: 0%"></div>
+                                        </div>
+                                        <div class="desc" id="perf-dom-depth-status">Target: &lt; 32 levels</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Image Optimization summary card -->
+                            <div class="card sub-card">
+                                <h2>Image Optimization</h2>
+                                <div class="img-metrics-summary">
+                                    <div class="img-stat-row">
+                                        <span class="lbl">Total Images Checked</span>
+                                        <strong id="img-total-checked">0</strong>
+                                    </div>
+                                    <div class="img-stat-row">
+                                        <span class="lbl">Next-Gen Format (WebP/AVIF)</span>
+                                        <strong id="img-pct-webp" class="text-success">0%</strong>
+                                    </div>
+                                    <div class="img-stat-row">
+                                        <span class="lbl">Lazy-loaded below fold</span>
+                                        <strong id="img-pct-lazy" class="text-success">0%</strong>
+                                    </div>
+                                    <div class="img-stat-row">
+                                        <span class="lbl">Explicit Width & Height</span>
+                                        <strong id="img-pct-dimensions" class="text-success">0%</strong>
+                                    </div>
+                                </div>
+                                <div class="img-warning-logs">
+                                    <h3>Image Optimization Warnings</h3>
+                                    <ul id="img-warnings-list">
+                                        <li>No images found.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Caching & CDN Summary -->
+                        <div class="card">
+                            <div class="caching-header-summary">
+                                <h2>Caching & CDN Audit</h2>
+                                <div class="caching-summary-badges">
+                                    <div class="caching-badge">
+                                        <span class="lbl">CDN Detected</span>
+                                        <span class="badge" id="caching-cdn-vendor">None</span>
+                                    </div>
+                                    <div class="caching-badge">
+                                        <span class="lbl">Cached Assets Ratio</span>
+                                        <span class="val text-success" id="caching-ratio">0%</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <h3>Static Asset Header Analysis</h3>
+                            <div class="table-container header-analysis-table">
+                                <table id="caching-assets-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Asset URL</th>
+                                            <th>Type</th>
+                                            <th>Cache-Control</th>
+                                            <th>CDN Header Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td colspan="4" class="empty-state">No assets analyzed.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -617,6 +827,30 @@
                     </select>
                 </div>
                 <button type="submit" class="btn btn-primary w-full">Start Scan</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- New Performance Scan Modal -->
+    <div id="modal-performance" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>New Performance Scan</h2>
+                <button class="btn-close" onclick="closeModal('modal-performance')">&times;</button>
+            </div>
+            <form id="performance-start-form">
+                <div class="form-group">
+                    <label for="perf-url">URL to Audit</label>
+                    <input type="url" id="perf-url" required placeholder="https://example.com" value="https://">
+                </div>
+                <div class="form-group">
+                    <label for="perf-strategy">Device Viewport Strategy</label>
+                    <select id="perf-strategy">
+                        <option value="mobile" selected>Mobile Device Emulation (Option A - Default)</option>
+                        <option value="desktop">Desktop Viewport Strategy (Option B)</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary w-full">Start Performance Audit</button>
             </form>
         </div>
     </div>

@@ -16,6 +16,7 @@ import app.scraper as scraper
 from app.crawler import start_crawl_job, ACTIVE_CRAWLS
 from app.optimizer import optimize_keyword_content
 from app.tracker import run_scheduled_rank_tracker, start_background_tracker
+from app.performance import run_performance_audit_job
 
 logger = logging.getLogger("seoking.main")
 
@@ -91,6 +92,10 @@ class KeywordAddReq(BaseModel):
 
 class OptimizeReq(BaseModel):
     keyword: str
+
+class PerformanceStartReq(BaseModel):
+    url: str
+    strategy: str = "mobile"
 
 # ----------------- AUTHENTICATION API -----------------
 
@@ -392,6 +397,88 @@ def api_delete_audit(run_id: int, user_id: int = Depends(get_current_user)):
         cursor.execute("DELETE FROM audit_runs WHERE id = ? AND user_id = ?", (run_id, user_id))
         conn.commit()
         return {"message": "Audit run deleted successfully."}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+# ----------------- PERFORMANCE AUDIT API -----------------
+
+@app.post("/api/performance/start")
+async def api_start_performance_audit(data: PerformanceStartReq, user_id: int = Depends(get_current_user)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    run_id = None
+    try:
+        cursor.execute(
+            "INSERT INTO performance_audits (user_id, url, strategy, status) VALUES (?, ?, ?, 'pending')",
+            (user_id, data.url, data.strategy)
+        )
+        conn.commit()
+        run_id = cursor.lastrowid
+    except Exception as e:
+        logger.error(f"Failed to create performance run: {e}")
+        raise HTTPException(status_code=500, detail="Failed to initialize performance run.")
+    finally:
+        conn.close()
+
+    if run_id:
+        asyncio.create_task(run_performance_audit_job(run_id, data.url, data.strategy))
+        return {"run_id": run_id, "status": "pending"}
+    raise HTTPException(status_code=500, detail="Failed to start performance run.")
+
+@app.get("/api/performance/runs")
+def api_get_performance_runs(user_id: int = Depends(get_current_user)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT id, url, strategy, status, lcp, inp, cls, ttfb, dom_size, created_at 
+            FROM performance_audits 
+            WHERE user_id = ? 
+            ORDER BY created_at DESC
+            """,
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+@app.get("/api/performance/run/{run_id}")
+def api_get_performance_detail(run_id: int, user_id: int = Depends(get_current_user)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT * FROM performance_audits WHERE id = ? AND user_id = ?",
+            (run_id, user_id)
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Performance run not found.")
+        d = dict(row)
+        if d.get("details_json"):
+            try:
+                d["details"] = json.loads(d["details_json"])
+            except Exception:
+                d["details"] = {}
+        else:
+            d["details"] = {}
+        return d
+    finally:
+        conn.close()
+
+@app.delete("/api/performance/run/{run_id}")
+def api_delete_performance_run(run_id: int, user_id: int = Depends(get_current_user)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM performance_audits WHERE id = ? AND user_id = ?", (run_id, user_id))
+        conn.commit()
+        return {"message": "Performance run deleted successfully."}
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
