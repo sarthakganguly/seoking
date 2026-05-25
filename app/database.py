@@ -31,6 +31,7 @@ def init_db():
     """
     Initializes the SQLite database schema if not already set up.
     Creates tables and indexes defined in docs/SCHEMA.md.
+    Also handles self-healing schema updates for existing installations.
     """
     db_dir = os.path.dirname(DB_PATH)
     if db_dir and not os.path.exists(db_dir):
@@ -64,6 +65,7 @@ def init_db():
         total_urls_crawled INTEGER DEFAULT 0,
         started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         completed_at TIMESTAMP,
+        details_json TEXT,
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
@@ -78,6 +80,11 @@ def init_db():
         is_broken BOOLEAN DEFAULT 0,
         has_redirect BOOLEAN DEFAULT 0,
         redirect_url TEXT,
+        canonical_url TEXT,
+        is_noindex BOOLEAN DEFAULT 0,
+        word_count INTEGER,
+        issues_json TEXT,
+        details_json TEXT,
         crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(audit_run_id) REFERENCES audit_runs(id) ON DELETE CASCADE
     );
@@ -110,9 +117,41 @@ def init_db():
 
     conn = get_db_connection()
     try:
+        # Create standard tables if not present
         conn.executescript(schema)
         conn.commit()
-        logger.info("Database initialized successfully with tables and indexes.")
+        
+        # Self-healing migration for existing databases
+        cursor = conn.cursor()
+        
+        # Check audit_runs columns
+        cursor.execute("PRAGMA table_info(audit_runs)")
+        runs_cols = [row["name"] for row in cursor.fetchall()]
+        if "details_json" not in runs_cols:
+            cursor.execute("ALTER TABLE audit_runs ADD COLUMN details_json TEXT;")
+            logger.info("Database migration: Added details_json to audit_runs table")
+            
+        # Check audit_pages columns
+        cursor.execute("PRAGMA table_info(audit_pages)")
+        pages_cols = [row["name"] for row in cursor.fetchall()]
+        if "canonical_url" not in pages_cols:
+            cursor.execute("ALTER TABLE audit_pages ADD COLUMN canonical_url TEXT;")
+            logger.info("Database migration: Added canonical_url to audit_pages table")
+        if "is_noindex" not in pages_cols:
+            cursor.execute("ALTER TABLE audit_pages ADD COLUMN is_noindex BOOLEAN DEFAULT 0;")
+            logger.info("Database migration: Added is_noindex to audit_pages table")
+        if "word_count" not in pages_cols:
+            cursor.execute("ALTER TABLE audit_pages ADD COLUMN word_count INTEGER;")
+            logger.info("Database migration: Added word_count to audit_pages table")
+        if "issues_json" not in pages_cols:
+            cursor.execute("ALTER TABLE audit_pages ADD COLUMN issues_json TEXT;")
+            logger.info("Database migration: Added issues_json to audit_pages table")
+        if "details_json" not in pages_cols:
+            cursor.execute("ALTER TABLE audit_pages ADD COLUMN details_json TEXT;")
+            logger.info("Database migration: Added details_json to audit_pages table")
+            
+        conn.commit()
+        logger.info("Database initialized successfully with tables, indexes, and migrations.")
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
         raise e

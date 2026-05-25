@@ -41,6 +41,7 @@ CREATE TABLE audit_runs (
     total_urls_crawled INTEGER DEFAULT 0,
     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
+    details_json TEXT, -- JSON-serialized dict containing robots.txt info, sitemaps list, and orphan pages list
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -56,6 +57,11 @@ CREATE TABLE audit_pages (
     is_broken BOOLEAN DEFAULT 0,
     has_redirect BOOLEAN DEFAULT 0,
     redirect_url TEXT,
+    canonical_url TEXT, -- The canonical link tag target URL if set
+    is_noindex BOOLEAN DEFAULT 0, -- 1 if page has noindex meta or header
+    word_count INTEGER, -- Word count of page text
+    issues_json TEXT, -- JSON array of strings listing detected SEO issues on the page
+    details_json TEXT, -- JSON dictionary of full structural/diagnostic checks (header tree, alt images list, schema list)
     crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(audit_run_id) REFERENCES audit_runs(id) ON DELETE CASCADE
 );

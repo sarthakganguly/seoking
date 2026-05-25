@@ -7,7 +7,7 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -22,8 +22,8 @@
                     <path d="M2 12L12 17L22 12" stroke="url(#brand-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     <defs>
                         <linearGradient id="brand-grad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
-                            <stop stop-color="#8b5cf6"/>
-                            <stop offset="1" stop-color="#6366f1"/>
+                            <stop stop-color="#10b981"/>
+                            <stop offset="1" stop-color="#d97706"/>
                         </linearGradient>
                     </defs>
                 </svg>
@@ -106,9 +106,9 @@
         <aside class="sidebar">
             <div class="sidebar-header">
                 <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="#8b5cf6" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M2 17L12 22L22 17" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M2 12L12 17L22 12" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="url(#brand-grad)" stroke="url(#brand-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 17L12 22L22 17" stroke="url(#brand-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 12L12 17L22 12" stroke="url(#brand-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
                 <span>SEO King</span>
             </div>
@@ -288,21 +288,33 @@
                         </div>
 
                         <div class="audit-summary-metrics">
-                            <div class="sub-metric">
+                            <div class="sub-metric filter-btn active" id="btn-filter-all" onclick="setAuditMetricFilter('all')">
                                 <span class="lbl">Total Pages</span>
                                 <span class="val" id="audit-metric-total">0</span>
                             </div>
-                            <div class="sub-metric text-danger">
-                                <span class="lbl">Broken Links (404)</span>
+                            <div class="sub-metric filter-btn text-danger" id="btn-filter-broken" onclick="setAuditMetricFilter('broken')">
+                                <span class="lbl">Broken (404)</span>
                                 <span class="val" id="audit-metric-broken">0</span>
                             </div>
-                            <div class="sub-metric text-warning">
+                            <div class="sub-metric filter-btn text-warning" id="btn-filter-redirect" onclick="setAuditMetricFilter('redirect')">
                                 <span class="lbl">Redirects</span>
                                 <span class="val" id="audit-metric-redirects">0</span>
                             </div>
-                            <div class="sub-metric text-success">
+                            <div class="sub-metric filter-btn text-success" id="btn-filter-healthy" onclick="setAuditMetricFilter('healthy')">
                                 <span class="lbl">Healthy (200)</span>
                                 <span class="val" id="audit-metric-healthy">0</span>
+                            </div>
+                            <div class="sub-metric">
+                                <span class="lbl">Robots.txt</span>
+                                <span class="val" id="audit-metric-robots">--</span>
+                            </div>
+                            <div class="sub-metric">
+                                <span class="lbl">XML Sitemaps</span>
+                                <span class="val" id="audit-metric-sitemaps">--</span>
+                            </div>
+                            <div class="sub-metric">
+                                <span class="lbl">Orphan Pages</span>
+                                <span class="val" id="audit-metric-orphans">--</span>
                             </div>
                         </div>
 
@@ -312,6 +324,7 @@
                                 <option value="all">All Pages</option>
                                 <option value="broken">Broken Only (404)</option>
                                 <option value="redirect">Redirects Only (3xx)</option>
+                                <option value="healthy">Healthy Only (200)</option>
                                 <option value="missing-meta">Missing Title/Meta Desc</option>
                             </select>
                         </div>
@@ -325,6 +338,7 @@
                                         <th>Title Tag</th>
                                         <th>Meta Description</th>
                                         <th>H1 Tag</th>
+                                        <th>Issues</th>
                                         <th>Redirect URL</th>
                                     </tr>
                                 </thead>
@@ -332,6 +346,12 @@
                                     <!-- Rendered dynamically -->
                                 </tbody>
                             </table>
+                        </div>
+                        <!-- Pagination Controls -->
+                        <div class="pagination-container" id="audit-pagination-controls">
+                            <button class="btn btn-sm btn-secondary" id="audit-pg-prev" onclick="changeAuditPage(-1)">Previous</button>
+                            <span class="pagination-info" id="audit-pg-info">Page 1 of 1</span>
+                            <button class="btn btn-sm btn-secondary" id="audit-pg-next" onclick="changeAuditPage(1)">Next</button>
                         </div>
                     </div>
                 </section>
@@ -479,6 +499,11 @@
                                     <option value="light">Light Theme (Clean White)</option>
                                 </select>
                             </div>
+                            <div class="form-group">
+                                <label for="pref-audit-limit">Audit Pages Per Page</label>
+                                <input type="number" id="pref-audit-limit" min="10" max="100" default="100">
+                                <span class="help-text">Controls number of pages shown in Site Audit reports (Default/Max: 100).</span>
+                            </div>
                         </div>
 
                         <!-- Scraper Limits -->
@@ -523,11 +548,34 @@
                             <div class="form-row">
                                 <div class="form-group">
                                     <label for="pref-locale">Locale</label>
-                                    <input type="text" id="pref-locale" placeholder="en-US">
+                                    <select id="pref-locale">
+                                        <option value="en-US">English (United States)</option>
+                                        <option value="en-GB">English (United Kingdom)</option>
+                                        <option value="en-CA">English (Canada)</option>
+                                        <option value="en-AU">English (Australia)</option>
+                                        <option value="en-IN">English (India)</option>
+                                        <option value="de-DE">German (Germany)</option>
+                                        <option value="fr-FR">French (France)</option>
+                                        <option value="es-ES">Spanish (Spain)</option>
+                                        <option value="it-IT">Italian (Italy)</option>
+                                        <option value="ja-JP">Japanese (Japan)</option>
+                                        <option value="zh-CN">Chinese (Simplified)</option>
+                                    </select>
                                 </div>
                                 <div class="form-group">
                                     <label for="pref-timezone">Timezone ID</label>
-                                    <input type="text" id="pref-timezone" placeholder="America/Los_Angeles">
+                                    <select id="pref-timezone">
+                                        <option value="America/New_York">America/New_York (US Eastern)</option>
+                                        <option value="America/Chicago">America/Chicago (US Central)</option>
+                                        <option value="America/Denver">America/Denver (US Mountain)</option>
+                                        <option value="America/Los_Angeles">America/Los_Angeles (US Pacific)</option>
+                                        <option value="Europe/London">Europe/London (GMT/BST)</option>
+                                        <option value="Europe/Paris">Europe/Paris (CET/CEST)</option>
+                                        <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                                        <option value="Asia/Tokyo">Asia/Tokyo (JST)</option>
+                                        <option value="Australia/Sydney">Australia/Sydney (AEST/AEDT)</option>
+                                        <option value="UTC">UTC (Universal Coordinated Time)</option>
+                                    </select>
                                 </div>
                             </div>
                             <span class="help-text">Natively injects browser location contexts to fetch highly targeted localized Google SERPs.</span>
@@ -592,11 +640,31 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label for="track-geo">Geolocation / Locale</label>
-                        <input type="text" id="track-geo" value="en-US" required>
+                        <select id="track-geo" required>
+                            <option value="en-US">en-US (United States)</option>
+                            <option value="en-GB">en-GB (United Kingdom)</option>
+                            <option value="en-CA">en-CA (Canada)</option>
+                            <option value="en-AU">en-AU (Australia)</option>
+                            <option value="en-IN">en-IN (India)</option>
+                            <option value="de-DE">de-DE (Germany)</option>
+                            <option value="fr-FR">fr-FR (France)</option>
+                            <option value="es-ES">es-ES (Spain)</option>
+                            <option value="it-IT">it-IT (Italy)</option>
+                            <option value="ja-JP">ja-JP (Japan)</option>
+                            <option value="zh-CN">zh-CN (China)</option>
+                        </select>
                     </div>
                     <div class="form-group">
                         <label for="track-lang">Language code</label>
-                        <input type="text" id="track-lang" value="en" required>
+                        <select id="track-lang" required>
+                            <option value="en">en (English)</option>
+                            <option value="de">de (German)</option>
+                            <option value="fr">fr (French)</option>
+                            <option value="es">es (Spanish)</option>
+                            <option value="it">it (Italian)</option>
+                            <option value="ja">ja (Japanese)</option>
+                            <option value="zh">zh (Chinese)</option>
+                        </select>
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary w-full">Add Keyword</button>

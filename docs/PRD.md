@@ -67,11 +67,27 @@ To prevent hardware throttling on the ThinkPad X230, the scraping logic must be 
 
 ### **Module 1: Technical Site Audit \[Local Execution\]**
 
-Behaves as a local diagnostic scanner for a single, user-defined domain.
+Behaves as a local diagnostic scanner for a single, user-defined domain, expanded to evaluate 16 rigorous technical SEO metrics:
 
-* **On-Demand Local Spider:** Crawls the target domain up to a configured depth. Maps broken links (404s), redirect chains (301/302), and server 5XX errors.  
-* **HTML Parser:** Extracts and flags missing or duplicated Title Tags, Meta Descriptions, Alt Text, and H1-H6 headers.  
-* **Local Storage:** Saves crawl results to a local SQLite database for historical comparison.
+1. **Robots.txt & Sitemap Audit:** Scans robots.txt directives and discovers/indexes XML sitemaps recursively (run-wide).
+2. **Orphan Page Detection:** Cross-references crawled URLs with sitemap URLs to discover orphan paths (run-wide).
+3. **JS-Dependent Rendering Risk:** Heuristically flags pages showing low raw word counts coupled with frontend frameworks (React, Vue, Next.js, Nuxt, etc.).
+4. **Canonicalization Checks:** Validates presence and accuracy of canonical target links, flagging external target mismatches.
+5. **Robots Meta Noindex Audits:** Scans `<meta name="robots">` and `X-Robots-Tag` HTTP headers to flag indexing blocks.
+6. **HTTP Status Code Compliance:** Logs server response codes (healthy 200s, redirects 3xx, broken 404s, etc.).
+7. **Title Tag Analysis:** Flags missing, duplicate, too short (<30 chars), or too long (>60 chars) title tags.
+8. **Meta Description Analysis:** Flags missing, duplicate, too short (<120 chars), or too long (>160 chars) meta descriptions.
+9. **H1 Tag Audits:** Verifies presence and uniqueness of H1 tags.
+10. **Header Hierarchy Levels:** Maps the full H1-H6 tree, flagging skipped levels (e.g. H1 straight to H3).
+11. **Thin Content Check:** Logs total body words and flags pages with fewer than 300 words.
+12. **Structured Data Validator:** Parses and logs JSON-LD and microdata schemas, validating JSON format.
+13. **Breadcrumbs Validator:** Detects presence of breadcrumb markup/schemas.
+14. **Taxonomy Duplication Checks:** Identifies category, tag, author, and archive URLs, checking for thin content and index status.
+15. **Pagination Tag Checks:** Identifies `rel="prev"` / `rel="next"` and page query parameters.
+16. **Anchor & Alt Text Audits:** Identifies images missing alt tags and links containing generic (e.g. "click here") or empty anchor text.
+
+* **UI Interface (Expanding Diagnostic Panels):** An expanding panel drawer under each page row allows deep inspection of the technical checklist, hierarchical header tree, structured data schemas, missing alt images, and generic anchor stats.
+* **Local Storage:** Saves crawl results, issues arrays, and structural metadata to a local SQLite database for historical comparison and CSV extraction.
 
 ### **Module 2: Content Optimization Engine \[Direct Scrape\]**
 

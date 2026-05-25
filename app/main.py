@@ -178,7 +178,8 @@ def api_get_settings(user_id: int = Depends(get_current_user)):
             "geolocation_latitude": "37.7749",
             "geolocation_longitude": "-122.4194",
             "locale": "en-US",
-            "timezone": "America/Los_Angeles"
+            "timezone": "America/Los_Angeles",
+            "audit_pagination_limit": "100"
         }
         for k, v in defaults.items():
             if k not in settings_dict:
@@ -225,7 +226,14 @@ def api_get_audit_runs(user_id: int = Depends(get_current_user)):
         conn.close()
 
 @app.get("/api/audit/run/{run_id}")
-def api_get_audit_details(run_id: int, user_id: int = Depends(get_current_user)):
+def api_get_audit_details(
+    run_id: int, 
+    page: int = 1, 
+    limit: int = 100, 
+    q: str = None, 
+    filter_type: str = "all",
+    user_id: int = Depends(get_current_user)
+):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -234,11 +242,137 @@ def api_get_audit_details(run_id: int, user_id: int = Depends(get_current_user))
         if not run:
             raise HTTPException(status_code=404, detail="Audit run not found.")
             
+        # Get limit from database settings if not explicitly smaller
+        db_limit = int(get_user_setting(user_id, "audit_pagination_limit", "100"))
+        limit = min(max(limit, 1), db_limit, 100) # Maximum and default is 100
+        
+        # Build query filters
+        query_parts = ["audit_run_id = ?"]
+        params = [run_id]
+        
+        if q:
+            query_parts.append("url LIKE ?")
+            params.append(f"%{q}%")
+            
+        if filter_type == "broken":
+            query_parts.append("is_broken = 1")
+        elif filter_type == "redirect":
+            query_parts.append("has_redirect = 1")
+        elif filter_type == "healthy":
+            query_parts.append("status_code >= 200 AND status_code < 300 AND is_broken = 0")
+        elif filter_type == "missing-meta":
+            query_parts.append("(title_tag IS NULL OR title_tag = '' OR meta_description IS NULL OR meta_description = '')")
+            
+        where_clause = " AND ".join(query_parts)
+        
+        # Get count of matching records
+        count_query = f"SELECT COUNT(*) FROM audit_pages WHERE {where_clause}"
+        cursor.execute(count_query, params)
+        total_items = cursor.fetchone()[0]
+        
+        # Calculate pagination offsets
+        import math
+        total_pages = math.ceil(total_items / limit) if total_items > 0 else 1
+        page = min(max(page, 1), total_pages)
+        offset = (page - 1) * limit
+        
+        # Query sliced records
+        pages_query = f"SELECT * FROM audit_pages WHERE {where_clause} ORDER BY crawled_at ASC LIMIT ? OFFSET ?"
+        cursor.execute(pages_query, params + [limit, offset])
+        pages = cursor.fetchall()
+        
+        # Also fetch summary metrics for the whole run
+        cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ?", (run_id,))
+        overall_total = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ? AND is_broken = 1", (run_id,))
+        overall_broken = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ? AND has_redirect = 1", (run_id,))
+        overall_redirect = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ? AND status_code >= 200 AND status_code < 300 AND is_broken = 0", (run_id,))
+        overall_healthy = cursor.fetchone()[0]
+        
+        # Parse json fields for run
+        run_dict = dict(run)
+        if "details_json" in run_dict and run_dict["details_json"]:
+            try:
+                run_dict["details"] = json.loads(run_dict["details_json"])
+            except Exception:
+                run_dict["details"] = None
+        else:
+            run_dict["details"] = None
+
+        # Parse json fields for pages
+        pages_list = []
+        for p in pages:
+            p_dict = dict(p)
+            if "issues_json" in p_dict and p_dict["issues_json"]:
+                try:
+                    p_dict["issues"] = json.loads(p_dict["issues_json"])
+                except Exception:
+                    p_dict["issues"] = []
+            else:
+                p_dict["issues"] = []
+                
+            if "details_json" in p_dict and p_dict["details_json"]:
+                try:
+                    p_dict["details"] = json.loads(p_dict["details_json"])
+                except Exception:
+                    p_dict["details"] = {}
+            else:
+                p_dict["details"] = {}
+            pages_list.append(p_dict)
+            
+        return {
+            "run": run_dict,
+            "pages": pages_list,
+            "total_items": total_items,
+            "total_pages": total_pages,
+            "current_page": page,
+            "limit": limit,
+            "metrics": {
+                "total": overall_total,
+                "broken": overall_broken,
+                "redirects": overall_redirect,
+                "healthy": overall_healthy
+            }
+        }
+    finally:
+        conn.close()
+
+@app.get("/api/audit/run/{run_id}/pages/all")
+def api_get_all_audit_pages(run_id: int, user_id: int = Depends(get_current_user)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id FROM audit_runs WHERE id = ? AND user_id = ?", (run_id, user_id))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Audit run not found.")
+            
         cursor.execute("SELECT * FROM audit_pages WHERE audit_run_id = ? ORDER BY crawled_at ASC", (run_id,))
         pages = cursor.fetchall()
+        
+        pages_list = []
+        for p in pages:
+            p_dict = dict(p)
+            if "issues_json" in p_dict and p_dict["issues_json"]:
+                try:
+                    p_dict["issues"] = json.loads(p_dict["issues_json"])
+                except Exception:
+                    p_dict["issues"] = []
+            else:
+                p_dict["issues"] = []
+                
+            if "details_json" in p_dict and p_dict["details_json"]:
+                try:
+                    p_dict["details"] = json.loads(p_dict["details_json"])
+                except Exception:
+                    p_dict["details"] = {}
+            else:
+                p_dict["details"] = {}
+            pages_list.append(p_dict)
+            
         return {
-            "run": dict(run),
-            "pages": [dict(p) for p in pages]
+            "pages": pages_list
         }
     finally:
         conn.close()
@@ -348,7 +482,7 @@ def api_delete_keyword(kw_id: int, user_id: int = Depends(get_current_user)):
         conn.close()
 
 @app.post("/api/keywords/trigger")
-def api_trigger_rank_update(user_id: int = Depends(get_current_user)):
+async def api_trigger_rank_update(user_id: int = Depends(get_current_user)):
     """
     Manually triggers position checks for all keywords in the background.
     """

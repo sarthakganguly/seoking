@@ -6,6 +6,9 @@ services:
     ports:
       - "8000:8000"
       - "8081:8081"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     volumes:
       - ./data:/app/data
       - ./app:/app/app
