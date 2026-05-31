@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,7 +7,7 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -278,11 +278,13 @@
                     </div>
 
                     <!-- Audit Detail View -->
+                    <!-- Audit Detail View (High Fidelity Tabbed Layout) -->
                     <div id="audit-detail-container" class="card hidden">
                         <div class="detail-header">
                             <div>
                                 <h2 id="audit-detail-domain">domain.com</h2>
                                 <span id="audit-detail-status" class="badge">completed</span>
+                                <span id="audit-detail-meta" class="text-muted text-sm" style="margin-left:10px;">Updated: --</span>
                             </div>
                             <div class="detail-actions">
                                 <button class="btn btn-sm btn-secondary" onclick="exportAuditCSV()">Download CSV</button>
@@ -291,71 +293,414 @@
                             </div>
                         </div>
 
-                        <div class="audit-summary-metrics">
-                            <div class="sub-metric filter-btn active" id="btn-filter-all" onclick="setAuditMetricFilter('all')">
-                                <span class="lbl">Total Pages</span>
-                                <span class="val" id="audit-metric-total">0</span>
-                            </div>
-                            <div class="sub-metric filter-btn text-danger" id="btn-filter-broken" onclick="setAuditMetricFilter('broken')">
-                                <span class="lbl">Broken (404)</span>
-                                <span class="val" id="audit-metric-broken">0</span>
-                            </div>
-                            <div class="sub-metric filter-btn text-warning" id="btn-filter-redirect" onclick="setAuditMetricFilter('redirect')">
-                                <span class="lbl">Redirects</span>
-                                <span class="val" id="audit-metric-redirects">0</span>
-                            </div>
-                            <div class="sub-metric filter-btn text-success" id="btn-filter-healthy" onclick="setAuditMetricFilter('healthy')">
-                                <span class="lbl">Healthy (200)</span>
-                                <span class="val" id="audit-metric-healthy">0</span>
-                            </div>
-                            <div class="sub-metric">
-                                <span class="lbl">Robots.txt</span>
-                                <span class="val" id="audit-metric-robots">--</span>
-                            </div>
-                            <div class="sub-metric">
-                                <span class="lbl">XML Sitemaps</span>
-                                <span class="val" id="audit-metric-sitemaps">--</span>
-                            </div>
-                            <div class="sub-metric">
-                                <span class="lbl">Orphan Pages</span>
-                                <span class="val" id="audit-metric-orphans">--</span>
-                            </div>
+                        <!-- Tab Navigation Bar -->
+                        <div class="audit-tabs-nav">
+                            <button class="audit-tab-btn active" data-tab="overview" onclick="switchAuditTab('overview')">Overview</button>
+                            <button class="audit-tab-btn" data-tab="issues" onclick="switchAuditTab('issues')">Issues</button>
+                            <button class="audit-tab-btn" data-tab="pages" onclick="switchAuditTab('pages')">Crawled Pages</button>
+                            <button class="audit-tab-btn" data-tab="statistics" onclick="switchAuditTab('statistics')">Statistics</button>
+                            <button class="audit-tab-btn" data-tab="compare" onclick="switchAuditTab('compare')">Compare Crawls</button>
                         </div>
 
-                        <div class="filter-bar">
-                            <input type="text" id="audit-page-search" placeholder="Filter URLs..." onkeyup="filterAuditPages()">
-                            <select id="audit-page-filter" onchange="filterAuditPages()">
-                                <option value="all">All Pages</option>
-                                <option value="broken">Broken Only (404)</option>
-                                <option value="redirect">Redirects Only (3xx)</option>
-                                <option value="healthy">Healthy Only (200)</option>
-                                <option value="missing-meta">Missing Title/Meta Desc</option>
-                            </select>
+                        <!-- Tab Content Panels -->
+                        <div class="audit-tab-contents">
+                            
+                            <!-- 1. OVERVIEW PANEL -->
+                            <div class="audit-tab-panel" id="tab-panel-overview">
+                                <div class="overview-widgets-grid">
+                                    <!-- Site Health Gauge -->
+                                    <div class="widget-card">
+                                        <h3>Site Health <i class="info-icon" title="Percentage of healthy indexable pages crawled">ℹ️</i></h3>
+                                        <div class="gauge-chart-container">
+                                            <svg class="gauge-svg-large" viewBox="0 0 100 60">
+                                                <path d="M 10 50 A 40 40 0 0 1 90 50" class="gauge-bg" fill="none" stroke-width="8"/>
+                                                <path d="M 10 50 A 40 40 0 0 1 90 50" class="gauge-fill-emerald" id="gauge-health-path" fill="none" stroke-width="8" stroke-dasharray="125.6" stroke-dashoffset="125.6"/>
+                                            </svg>
+                                            <div class="gauge-text-large" id="gauge-health-val">0%</div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Crawled Pages Breakdown -->
+                                    <div class="widget-card">
+                                        <h3>Crawled Pages <i class="info-icon" title="Breakdown of page crawl statuses">ℹ️</i></h3>
+                                        <div class="crawled-pages-status-bar" id="crawled-pages-bar"></div>
+                                        <div class="crawled-pages-legend" id="crawled-pages-legend-list"></div>
+                                    </div>
+                                    
+                                    <!-- AI Search Health Gauge -->
+                                    <div class="widget-card">
+                                        <h3>AI Search Health <span class="badge badge-warning text-xs" style="font-size:10px; padding:1px 4px;">BETA</span> <i class="info-icon" title="Visibility to major AI agents like ChatGPT and Google-Extended">ℹ️</i></h3>
+                                        <div class="gauge-chart-container">
+                                            <svg class="gauge-svg-large" viewBox="0 0 100 60">
+                                                <path d="M 10 50 A 40 40 0 0 1 90 50" class="gauge-bg" fill="none" stroke-width="8"/>
+                                                <path d="M 10 50 A 40 40 0 0 1 90 50" class="gauge-fill-amber" id="gauge-ai-path" fill="none" stroke-width="8" stroke-dasharray="125.6" stroke-dashoffset="125.6"/>
+                                            </svg>
+                                            <div class="gauge-text-large" id="gauge-ai-val">0%</div>
+                                        </div>
+                                        <div class="warning-text-box" style="margin-top:5px; font-size:11px;" id="gauge-ai-desc">
+                                            Optimize robots.txt for AI Search Agents.
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Blocked from AI Search Agents -->
+                                    <div class="widget-card">
+                                        <h3>Blocked from AI Search <i class="info-icon" title="Detailed AI agent blocking counts in robots.txt">ℹ️</i></h3>
+                                        <ul class="ai-blocked-list" id="ai-blocked-agents-list"></ul>
+                                    </div>
+                                </div>
+                                
+                                <div class="overview-bottom-grid">
+                                    <!-- Errors & Warnings sparkcards -->
+                                    <div class="spark-metrics-card">
+                                        <div class="spark-metric">
+                                            <div class="val text-danger" id="overview-errors-count">0</div>
+                                            <div class="lbl">Total Errors</div>
+                                        </div>
+                                        <div class="spark-metric" style="border-top: 1px solid var(--border-color); padding-top: 15px;">
+                                            <div class="val text-warning" id="overview-warnings-count">0</div>
+                                            <div class="lbl">Total Warnings</div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Top Issues List -->
+                                    <div class="top-issues-card">
+                                        <h3>Top Issues <button class="btn btn-sm btn-secondary" onclick="switchAuditTab('issues')">View all issues</button></h3>
+                                        <ul class="top-issues-list" id="overview-top-issues-list"></ul>
+                                    </div>
+                                </div>
+                                
+                                <!-- Thematic Reports Grid -->
+                                <div class="thematic-reports-container">
+                                    <h2>Thematic Reports</h2>
+                                    <div class="thematic-reports-grid">
+                                        <!-- Robots.txt -->
+                                        <div class="theme-card" onclick="openThemeReport('robots')">
+                                            <div class="theme-card-header">
+                                                <h4>Robots.txt</h4>
+                                                <i class="info-icon">ℹ️</i>
+                                            </div>
+                                            <div class="theme-card-val">No changes</div>
+                                            <button class="btn btn-sm btn-secondary">Open file</button>
+                                        </div>
+                                        <!-- Crawlability -->
+                                        <div class="theme-card" onclick="openThemeReport('crawlability')">
+                                            <div class="theme-card-header">
+                                                <h4>Crawlability</h4>
+                                                <i class="info-icon">ℹ️</i>
+                                            </div>
+                                            <div class="theme-ring-wrapper">
+                                                <svg viewBox="0 0 36 36" class="circular-chart">
+                                                    <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                                    <path class="circle-fill" id="ring-crawlability" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                                </svg>
+                                                <div class="ring-text" id="ring-crawlability-text">0%</div>
+                                            </div>
+                                            <button class="btn btn-sm btn-secondary">View details</button>
+                                        </div>
+                                        <!-- HTTPS -->
+                                        <div class="theme-card" onclick="openThemeReport('https')">
+                                            <div class="theme-card-header">
+                                                <h4>HTTPS</h4>
+                                                <i class="info-icon">ℹ️</i>
+                                            </div>
+                                            <div class="theme-ring-wrapper">
+                                                <svg viewBox="0 0 36 36" class="circular-chart">
+                                                    <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                                    <path class="circle-fill" id="ring-https" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                                </svg>
+                                                <div class="ring-text" id="ring-https-text">0%</div>
+                                            </div>
+                                            <button class="btn btn-sm btn-secondary">View details</button>
+                                        </div>
+                                        <!-- Site Performance -->
+                                        <div class="theme-card" onclick="openThemeReport('performance')">
+                                            <div class="theme-card-header">
+                                                <h4>Site Performance</h4>
+                                                <i class="info-icon">ℹ️</i>
+                                            </div>
+                                            <div class="theme-ring-wrapper">
+                                                <svg viewBox="0 0 36 36" class="circular-chart">
+                                                    <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                                    <path class="circle-fill" id="ring-performance" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                                </svg>
+                                                <div class="ring-text" id="ring-performance-text">0%</div>
+                                            </div>
+                                            <button class="btn btn-sm btn-secondary">View details</button>
+                                        </div>
+                                        <!-- Internal Linking -->
+                                        <div class="theme-card" onclick="openThemeReport('linking')">
+                                            <div class="theme-card-header">
+                                                <h4>Internal Linking</h4>
+                                                <i class="info-icon">ℹ️</i>
+                                            </div>
+                                            <div class="theme-ring-wrapper">
+                                                <svg viewBox="0 0 36 36" class="circular-chart">
+                                                    <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                                    <path class="circle-fill" id="ring-linking" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                                </svg>
+                                                <div class="ring-text" id="ring-linking-text">0%</div>
+                                            </div>
+                                            <button class="btn btn-sm btn-secondary">View details</button>
+                                        </div>
+                                        <!-- Markup -->
+                                        <div class="theme-card" onclick="openThemeReport('markup')">
+                                            <div class="theme-card-header">
+                                                <h4>Markup</h4>
+                                                <i class="info-icon">ℹ️</i>
+                                            </div>
+                                            <div class="theme-ring-wrapper">
+                                                <svg viewBox="0 0 36 36" class="circular-chart">
+                                                    <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                                    <path class="circle-fill" id="ring-markup" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                                </svg>
+                                                <div class="ring-text" id="ring-markup-text">0%</div>
+                                            </div>
+                                            <button class="btn btn-sm btn-secondary">View details</button>
+                                        </div>
+                                        <!-- International SEO -->
+                                        <div class="theme-card disabled">
+                                            <div class="theme-card-header">
+                                                <h4>International SEO</h4>
+                                            </div>
+                                            <div class="theme-card-desc">Not implemented on this site.</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 2. ISSUES PANEL -->
+                            <div class="audit-tab-panel hidden" id="tab-panel-issues">
+                                <div id="issues-list-view">
+                                    <div class="issues-filter-bar">
+                                        <input type="text" id="issues-search" placeholder="Search issues..." onkeyup="filterIssuesList()">
+                                        <div class="issues-category-filters" id="issues-cats-chips"></div>
+                                        <div class="issues-severity-filters">
+                                            <button class="severity-btn active" data-severity="all" onclick="setIssuesSeverityFilter('all', this)">All</button>
+                                            <button class="severity-btn text-danger" data-severity="errors" onclick="setIssuesSeverityFilter('errors', this)">Errors</button>
+                                            <button class="severity-btn text-warning" data-severity="warnings" onclick="setIssuesSeverityFilter('warnings', this)">Warnings</button>
+                                            <button class="severity-btn text-info" data-severity="notices" onclick="setIssuesSeverityFilter('notices', this)">Notices</button>
+                                        </div>
+                                    </div>
+                                    <div class="issues-list-wrapper" id="issues-accordion-container"></div>
+                                </div>
+                                
+                                <!-- Individual Issue Detail View (Hidden by default) -->
+                                <div id="single-issue-detail-view" class="hidden">
+                                    <div class="issue-detail-header-row">
+                                        <button class="btn btn-sm btn-secondary" onclick="goBackToIssuesList()">← All issues</button>
+                                        <div class="issue-title-bar">
+                                            <h3 id="single-issue-title">Issue Name</h3>
+                                            <span class="badge" id="single-issue-severity-badge">error</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="issue-diagnostic-summary">
+                                        <div class="failed-count-status">
+                                            Failed: <strong class="text-danger" id="single-issue-failed-count">0</strong>
+                                            Successful: <strong class="text-success" id="single-issue-success-count">0</strong>
+                                            <div class="failed-progress-bar">
+                                                <div class="bar-fill" id="single-issue-progress-fill" style="width: 0%"></div>
+                                            </div>
+                                        </div>
+                                        <div class="how-to-fix-box">
+                                            <strong>How to fix:</strong>
+                                            <p id="single-issue-how-to-fix">Fix details...</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="table-container">
+                                        <table id="single-issue-pages-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Page URL</th>
+                                                    <th>Status Code</th>
+                                                    <th>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 3. CRAWLED PAGES PANEL -->
+                            <div class="audit-tab-panel hidden" id="tab-panel-pages">
+                                <div class="crawled-pages-subtabs">
+                                    <button class="pages-subtab-btn active" data-subtab="pages" onclick="switchPagesSubtab('pages')">Pages</button>
+                                    <button class="pages-subtab-btn" data-subtab="structure" onclick="switchPagesSubtab('structure')">Site Structure</button>
+                                </div>
+                                
+                                <div id="crawled-pages-subtab-content">
+                                    <!-- Pages List Tab -->
+                                    <div class="crawled-subview" id="pages-subview-list">
+                                        <div class="filter-bar">
+                                            <input type="text" id="audit-page-search" placeholder="Filter URLs..." onkeyup="filterAuditPages()">
+                                            <select id="audit-page-filter" onchange="filterAuditPages()">
+                                                <option value="all">All Pages</option>
+                                                <option value="broken">Broken Only (4xx/5xx)</option>
+                                                <option value="redirect">Redirects Only (3xx)</option>
+                                                <option value="healthy">Healthy Only (200)</option>
+                                                <option value="blocked-ai">Blocked AI search bots</option>
+                                            </select>
+                                        </div>
+                                        
+                                        <div class="table-container">
+                                            <table id="audit-pages-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>ILR</th>
+                                                        <th>Page URL & Title</th>
+                                                        <th>Status</th>
+                                                        <th>Issues</th>
+                                                        <th>Blocked AI Bots</th>
+                                                        <th>Crawl Depth</th>
+                                                        <th>Reaudit</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody></tbody>
+                                            </table>
+                                        </div>
+                                        
+                                        <!-- Pagination Controls -->
+                                        <div class="pagination-container" id="audit-pagination-controls">
+                                            <button class="btn btn-sm btn-secondary" id="audit-pg-prev" onclick="changeAuditPage(-1)">Previous</button>
+                                            <span class="pagination-info" id="audit-pg-info">Page 1 of 1</span>
+                                            <button class="btn btn-sm btn-secondary" id="audit-pg-next" onclick="changeAuditPage(1)">Next</button>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Site Structure Sitemap list -->
+                                    <div class="crawled-subview hidden" id="pages-subview-structure">
+                                        <h3>XML Sitemap Structures</h3>
+                                        <div class="table-container">
+                                            <table id="sitemaps-structure-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Sitemap URL</th>
+                                                        <th>Status</th>
+                                                        <th>Type</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody></tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 4. STATISTICS PANEL -->
+                            <div class="audit-tab-panel hidden" id="tab-panel-statistics">
+                                <div class="stats-toggle-bar">
+                                    <button class="stats-toggle-btn active" data-mode="tile" onclick="switchStatsMode('tile')">Tile</button>
+                                    <button class="stats-toggle-btn" data-mode="graph" onclick="switchStatsMode('graph')">Graph</button>
+                                </div>
+                                
+                                <div class="statistics-tiles-grid" id="stats-tiles-view">
+                                    <div class="stat-widget-card" id="stat-tile-status">
+                                        <h4>HTTP Status Code</h4>
+                                        <div class="stat-big-num" id="stat-tile-status-num">0%</div>
+                                        <div class="stat-subtitle">pages with 4xx and 5xx status codes</div>
+                                        <div class="stat-progress-list" id="stat-tile-status-list"></div>
+                                    </div>
+                                    
+                                    <div class="stat-widget-card" id="stat-tile-sitemap">
+                                        <h4>Sitemap vs. Crawled Pages</h4>
+                                        <div class="stat-big-num" id="stat-tile-sitemap-num">0</div>
+                                        <div class="stat-subtitle">pages in sitemap</div>
+                                        <div class="stat-progress-list" id="stat-tile-sitemap-list"></div>
+                                    </div>
+                                    
+                                    <div class="stat-widget-card" id="stat-tile-depth">
+                                        <h4>Pages Crawl Depth</h4>
+                                        <div class="stat-big-num" id="stat-tile-depth-num">0%</div>
+                                        <div class="stat-subtitle">pages with more than 3 clicks</div>
+                                        <div class="stat-progress-list" id="stat-tile-depth-list"></div>
+                                    </div>
+                                    
+                                    <div class="stat-widget-card" id="stat-tile-links">
+                                        <h4>Incoming Internal Links</h4>
+                                        <div class="stat-big-num" id="stat-tile-links-num">0%</div>
+                                        <div class="stat-subtitle">pages have only 1 incoming link</div>
+                                        <div class="stat-progress-list" id="stat-tile-links-list"></div>
+                                    </div>
+                                    
+                                    <div class="stat-widget-card" id="stat-tile-markup">
+                                        <h4>Markup Types</h4>
+                                        <div class="stat-big-num" id="stat-tile-markup-num">0%</div>
+                                        <div class="stat-subtitle">pages have no markup</div>
+                                        <div class="stat-progress-list" id="stat-tile-markup-list"></div>
+                                    </div>
+                                    
+                                    <div class="stat-widget-card" id="stat-tile-canonical">
+                                        <h4>Canonicalization</h4>
+                                        <div class="stat-big-num" id="stat-tile-canonical-num">0%</div>
+                                        <div class="stat-subtitle">pages without rel="canonical"</div>
+                                        <div class="stat-progress-list" id="stat-tile-canonical-list"></div>
+                                    </div>
+                                    
+                                    <div class="stat-widget-card">
+                                        <h4>Hreflang Usage</h4>
+                                        <div class="stat-big-num">0%</div>
+                                        <div class="stat-subtitle">pages without issues</div>
+                                        <div class="stat-progress-list">
+                                            <div class="stat-row"><span class="lbl">With issues:</span><strong>0%</strong></div>
+                                            <div class="stat-row"><span class="lbl">Without hreflang:</span><strong>100%</strong></div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="stat-widget-card">
+                                        <h4>AMP Links</h4>
+                                        <div class="stat-big-num">0%</div>
+                                        <div class="stat-subtitle">pages have AMP link</div>
+                                        <div class="stat-progress-list">
+                                            <div class="stat-row"><span class="lbl">Pages with no AMP:</span><strong>100%</strong></div>
+                                            <div class="stat-row"><span class="lbl">Pages with AMP:</span><strong>0%</strong></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="statistics-graph-view hidden" id="stats-graph-view-panel">
+                                    <h3>Crawl Metrics Overview</h3>
+                                    <svg id="stats-comparative-svg" width="100%" height="320" viewBox="0 0 800 320"></svg>
+                                </div>
+                            </div>
+                            
+                            <!-- 5. COMPARE CRAWLS PANEL -->
+                            <div class="audit-tab-panel hidden" id="tab-panel-compare">
+                                <div class="comparison-selectors">
+                                    <label for="compare-run-1">Compare run:</label>
+                                    <select id="compare-run-1" onchange="runComparisonChecks()"></select>
+                                    <span>vs.</span>
+                                    <select id="compare-run-2" onchange="runComparisonChecks()"></select>
+                                </div>
+                                
+                                <div class="comparison-results" id="compare-results-view">
+                                    <div class="table-container">
+                                        <table id="comparison-metrics-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Metric</th>
+                                                    <th>Run 1 Value</th>
+                                                    <th>Run 2 Value</th>
+                                                    <th>Fixed Difference</th>
+                                                    <th>New Difference</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                            
                         </div>
 
-                        <div class="table-container">
-                            <table id="audit-pages-table">
-                                <thead>
-                                    <tr>
-                                        <th>URL</th>
-                                        <th>Status</th>
-                                        <th>Title Tag</th>
-                                        <th>Meta Description</th>
-                                        <th>H1 Tag</th>
-                                        <th>Issues</th>
-                                        <th>Redirect URL</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <!-- Rendered dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                        <!-- Pagination Controls -->
-                        <div class="pagination-container" id="audit-pagination-controls">
-                            <button class="btn btn-sm btn-secondary" id="audit-pg-prev" onclick="changeAuditPage(-1)">Previous</button>
-                            <span class="pagination-info" id="audit-pg-info">Page 1 of 1</span>
-                            <button class="btn btn-sm btn-secondary" id="audit-pg-next" onclick="changeAuditPage(1)">Next</button>
+                        <!-- Thematic Details Overlay Screen -->
+                        <div id="thematic-report-overlay" class="thematic-detail-overlay hidden">
+                            <div class="overlay-header">
+                                <button class="btn btn-sm btn-secondary" onclick="closeThematicReport()">← Go to Overview</button>
+                                <h2 id="thematic-report-title">Thematic Report</h2>
+                            </div>
+                            <div class="overlay-body" id="thematic-report-body-content"></div>
                         </div>
                     </div>
                 </section>

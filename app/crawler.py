@@ -7,6 +7,9 @@ import urllib.parse
 from urllib.error import HTTPError, URLError
 import logging
 import re
+import socket
+import ssl
+from datetime import datetime
 from bs4 import BeautifulSoup
 from app.database import get_db_connection, get_user_setting
 
@@ -14,6 +17,92 @@ logger = logging.getLogger("seoking.crawler")
 
 # Global dict to track active crawl tasks, allowing cancellation
 ACTIVE_CRAWLS = {}
+
+def check_ssl(domain: str) -> dict:
+    """
+    Connects to domain via SSL port 443 and checks details.
+    """
+    clean_domain = domain.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+    context = ssl.create_default_context()
+    try:
+        with socket.create_connection((clean_domain, 443), timeout=4) as sock:
+            with context.wrap_socket(sock, server_hostname=clean_domain) as ssock:
+                cert = ssock.getpeercert()
+                not_after_str = cert.get('notAfter')
+                if not_after_str:
+                    not_after = datetime.strptime(not_after_str, '%b %d %H:%M:%S %Y %Z')
+                    days_left = (not_after - datetime.utcnow()).days
+                    expiry_date = not_after.strftime('%Y-%m-%d')
+                    
+                    subject = dict(x[0] for x in cert.get('subject', ()))
+                    common_name = subject.get('commonName', '')
+                    
+                    alt_names = [x[1] for x in cert.get('subjectAltName', ()) if x[0] == 'DNS']
+                    name_matches = False
+                    if clean_domain.lower() == common_name.lower():
+                        name_matches = True
+                    else:
+                        for alt in alt_names:
+                            if alt.replace('*', '') in clean_domain.lower():
+                                name_matches = True
+                                break
+                    return {
+                        "valid": True,
+                        "days_left": days_left,
+                        "expiry_date": expiry_date,
+                        "common_name": common_name,
+                        "name_matches": name_matches,
+                        "support_sni": True,
+                        "tls_version": ssock.version()
+                    }
+    except Exception as e:
+        logger.warning(f"SSL certificate check failed for {clean_domain}: {e}")
+    return {
+        "valid": False,
+        "days_left": 0,
+        "expiry_date": None,
+        "common_name": None,
+        "name_matches": False,
+        "support_sni": False,
+        "tls_version": None
+    }
+
+def is_bot_blocked_robots_txt(robots_content: str, url_path: str, bot_name: str) -> bool:
+    if not robots_content:
+        return False
+    lines = robots_content.splitlines()
+    current_user_agents = []
+    rules = []
+    for line in lines:
+        line = line.strip().lower()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('user-agent:'):
+            ua = line.split(':', 1)[1].strip()
+            current_user_agents.append(ua)
+        elif line.startswith('disallow:') or line.startswith('allow:'):
+            parts = line.split(':', 1)
+            rule_type = parts[0].strip()
+            path = parts[1].strip() if len(parts) > 1 else ""
+            for ua in current_user_agents:
+                if ua == '*' or bot_name.lower() in ua:
+                    rules.append((ua, rule_type, path))
+    
+    bot_rules = [r for r in rules if r[0] == bot_name.lower()]
+    if not bot_rules:
+        bot_rules = [r for r in rules if r[0] == '*']
+        
+    blocked = False
+    for ua, rule_type, rule_path in bot_rules:
+        if rule_path == '':
+            if rule_type == 'disallow':
+                blocked = False
+        elif url_path.startswith(rule_path):
+            if rule_type == 'disallow':
+                blocked = True
+            elif rule_type == 'allow':
+                blocked = False
+    return blocked
 
 def parse_urls_from_xml(xml_content: str) -> list[str]:
     """
@@ -106,6 +195,9 @@ class AuditCrawler:
 
         # Step 3: Scan Sitemap Orphan pages
         await self.check_orphan_pages()
+
+        # Step 4: Run post-crawl PageRank, SSL checks, and blocking audits
+        await self.post_crawl_calculations()
 
         self.update_run_status("completed")
         logger.info(f"Crawl completed. Crawled {self.crawled_count} pages.")
@@ -238,6 +330,135 @@ class AuditCrawler:
                 
         self.run_details["orphan_pages"] = orphans
         self.save_run_details()
+
+    async def post_crawl_calculations(self):
+        """
+        Runs post-crawl calculations: SSL checks, PageRank (ILR), incoming link counts,
+        AI crawler block analyses, and aggregates top-level run details.
+        """
+        logger.info(f"Running post-crawl calculations for run_id {self.run_id}")
+        
+        # 1. Run SSL check on domain
+        ssl_details = check_ssl(self.base_url)
+        self.run_details["ssl_details"] = ssl_details
+        
+        # 2. Fetch all pages crawled for this run
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT id, url, details_json, issues_json FROM audit_pages WHERE audit_run_id = ?", (self.run_id,))
+            rows = cursor.fetchall()
+            pages = []
+            for r in rows:
+                p_id = r["id"]
+                p_url = r["url"]
+                try:
+                    p_details = json.loads(r["details_json"])
+                except Exception:
+                    p_details = {}
+                try:
+                    p_issues = json.loads(r["issues_json"])
+                except Exception:
+                    p_issues = []
+                pages.append({"id": p_id, "url": p_url, "details": p_details, "issues": p_issues})
+                
+            if not pages:
+                return
+                
+            N = len(pages)
+            
+            # Compute incoming links mapping
+            incoming_links_map = {p["url"]: [] for p in pages}
+            outgoing_links_map = {p["url"]: p["details"].get("outgoing_links", []) for p in pages}
+            
+            for p in pages:
+                for out_url in p["details"].get("outgoing_links", []):
+                    if out_url in incoming_links_map:
+                        incoming_links_map[out_url].append(p["url"])
+            
+            # Simple PageRank (ILR)
+            pr = {p["url"]: 1.0 / N for p in pages}
+            d = 0.85
+            
+            for _ in range(10):
+                new_pr = {}
+                dangling_weight = sum(pr[p["url"]] for p in pages if not outgoing_links_map[p["url"]]) / N
+                
+                for p in pages:
+                    url = p["url"]
+                    sum_links = 0.0
+                    for incoming_url in incoming_links_map[url]:
+                        out_count = len(outgoing_links_map[incoming_url])
+                        if out_count > 0:
+                            sum_links += pr[incoming_url] / out_count
+                    
+                    new_pr[url] = ((1 - d) / N) + d * (sum_links + dangling_weight)
+                pr = new_pr
+                
+            # Normalize PageRank to 1-100 scale
+            pr_vals = list(pr.values())
+            min_pr = min(pr_vals) if pr_vals else 0.0
+            max_pr = max(pr_vals) if pr_vals else 1.0
+            pr_range = max_pr - min_pr
+            
+            ilr_scores = {}
+            for url, val in pr.items():
+                if pr_range > 0:
+                    ilr_scores[url] = int(10 + (val - min_pr) / pr_range * 90)
+                else:
+                    ilr_scores[url] = 100
+            
+            # 3. Check AI robots blocking
+            robots_txt_content = self.run_details.get("robots_txt_content", "")
+            ai_bots = ["ChatGPT-User", "OAI-SearchBot", "Googlebot", "Google-Extended"]
+            
+            ai_blocked_counts = {bot: 0 for bot in ai_bots}
+            total_ai_checks = len(pages) * len(ai_bots)
+            blocked_ai_checks = 0
+            
+            # Update each page
+            for p in pages:
+                url = p["url"]
+                parsed_url = urllib.parse.urlparse(url)
+                url_path = parsed_url.path or "/"
+                
+                blocked_bots = []
+                for bot in ai_bots:
+                    is_blocked = is_bot_blocked_robots_txt(robots_txt_content, url_path, bot)
+                    if is_blocked:
+                        blocked_bots.append(bot)
+                        ai_blocked_counts[bot] += 1
+                        blocked_ai_checks += 1
+                
+                # Update details with post-crawl calculations
+                p["details"]["incoming_links"] = incoming_links_map[url]
+                p["details"]["incoming_links_count"] = len(incoming_links_map[url])
+                p["details"]["ilr"] = ilr_scores[url]
+                p["details"]["blocked_ai_bots"] = blocked_bots
+                p["details"]["ssl_valid"] = ssl_details.get("valid", False) if url.startswith("https") else False
+                
+                # Add notices / warnings for specific issues shown in screenshots
+                if blocked_bots and "Blocked from crawling by AI agents" not in p["issues"]:
+                    p["issues"].append("Blocked from crawling by AI agents")
+                
+                # Save page changes
+                cursor.execute(
+                    "UPDATE audit_pages SET issues_json = ?, details_json = ? WHERE id = ?",
+                    (json.dumps(p["issues"]), json.dumps(p["details"]), p["id"])
+                )
+                
+            # Update top-level run details
+            ai_search_health = int(((total_ai_checks - blocked_ai_checks) / total_ai_checks) * 100) if total_ai_checks > 0 else 100
+            
+            self.run_details["ai_search_health"] = ai_search_health
+            self.run_details["ai_blocked_counts"] = ai_blocked_counts
+            self.run_details["ssl_details"] = ssl_details
+            
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error in post-crawl calculations: {e}")
+        finally:
+            conn.close()
 
     def analyze_page_seo(self, url: str, status_code: int, response_headers: dict, html_content: bytes) -> dict:
         """
@@ -419,6 +640,14 @@ class AuditCrawler:
         if is_taxonomy and thin_content:
             issues.append("Redundant Taxonomy Page")
 
+        # Extract resources count and schema flags
+        css_count = len(soup.find_all('link', rel='stylesheet'))
+        js_count = len([s for s in soup.find_all('script') if s.get('src')])
+        has_microdata = len(soup.find_all(attrs={'itemtype': True})) > 0
+        has_json_ld = len(soup.find_all('script', attrs={'type': 'application/ld+json'})) > 0
+        has_og = len(soup.find_all('meta', attrs={'property': re.compile(r'^og:')})) > 0
+        has_twitter = len(soup.find_all('meta', attrs={'name': re.compile(r'^twitter:')})) > 0
+
         return {
             "canonical_url": canonical_url,
             "is_noindex": 1 if is_noindex else 0,
@@ -433,6 +662,12 @@ class AuditCrawler:
                 "is_taxonomy": is_taxonomy,
                 "has_pagination": has_pagination,
                 "header_hierarchy": headers,
+                "css_count": css_count,
+                "js_count": js_count,
+                "has_microdata": has_microdata,
+                "has_json_ld": has_json_ld,
+                "has_og": has_og,
+                "has_twitter": has_twitter,
                 "images": {
                     "total": total_images,
                     "missing_alts_count": len(missing_alts),
@@ -472,13 +707,16 @@ class AuditCrawler:
             discovered_links = []
             
             # Request
+            import time
             req = urllib.request.Request(
                 url, 
                 headers={'User-Agent': 'Mozilla/5.0 SEOKingBot/1.0'}
             )
             
+            start_time = time.time()
             try:
                 response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)
+                load_time = time.time() - start_time
                 status_code = response.status
                 
                 final_url = response.geturl()
@@ -520,21 +758,47 @@ class AuditCrawler:
                     issues = audit_res["issues"]
                     details = audit_res["details"]
                     
+                # Store depth, load_time, and outgoing links
+                details["depth"] = depth
+                details["load_time"] = round(load_time, 3)
+                
+                internal_links = []
+                for l in discovered_links:
+                    try:
+                        parsed_l = urllib.parse.urlparse(l)
+                        if parsed_l.netloc == self.netloc:
+                            internal_links.append(l)
+                    except Exception:
+                        pass
+                details["outgoing_links"] = list(set(internal_links))
+                
             except HTTPError as e:
+                load_time = time.time() - start_time
                 status_code = e.code
                 is_broken = (status_code == 404)
                 logger.warning(f"HTTP Error {status_code} for {url}")
                 issues = ["Broken Link (404)"] if is_broken else [f"HTTP Error {status_code}"]
+                details["depth"] = depth
+                details["load_time"] = round(load_time, 3)
+                details["outgoing_links"] = []
             except URLError as e:
+                load_time = time.time() - start_time
                 status_code = 0
                 is_broken = True
                 logger.error(f"URL Error for {url}: {e.reason}")
                 issues = ["Network Resolution Error"]
+                details["depth"] = depth
+                details["load_time"] = round(load_time, 3)
+                details["outgoing_links"] = []
             except Exception as e:
+                load_time = time.time() - start_time
                 status_code = 0
                 is_broken = True
                 logger.error(f"General error crawling {url}: {e}")
                 issues = ["Crawl Execution Failure"]
+                details["depth"] = depth
+                details["load_time"] = round(load_time, 3)
+                details["outgoing_links"] = []
 
             # Save to SQLite Database
             self.crawled_count += 1

@@ -362,7 +362,7 @@ async function loadSettings() {
     try {
         const res = await fetch("/api/settings");
         currentSettings = await res.json();
-        setTheme(currentSettings.theme || "dark");
+        setTheme(currentSettings.theme || "light");
     } catch (e) {
         console.error("Failed to load settings:", e);
     }
@@ -370,7 +370,7 @@ async function loadSettings() {
 
 async function loadSettingsToForm() {
     await loadSettings();
-    document.getElementById("pref-theme").value = currentSettings.theme || "dark";
+    document.getElementById("pref-theme").value = currentSettings.theme || "light";
     document.getElementById("pref-max-browser").value = currentSettings.max_concurrent_browser_tabs || "3";
     document.getElementById("pref-max-crawler").value = currentSettings.max_concurrent_crawler_tabs || "3";
     document.getElementById("pref-jitter-min").value = currentSettings.jitter_min_ms || "3000";
@@ -449,6 +449,25 @@ async function loadDashboardMetrics() {
         let totalPages = 0;
         runs.forEach(r => totalPages += r.total_urls_crawled);
         document.getElementById("dash-pages-crawled").innerText = totalPages;
+        
+        // Find the latest completed run to calculate site health
+        const latestCompleted = runs.find(r => r.status === "completed");
+        if (latestCompleted) {
+            try {
+                const limit = parseInt(currentSettings.audit_pagination_limit || "100");
+                const detailRes = await fetch(`/api/audit/run/${latestCompleted.id}?page=1&limit=${limit}&filter_type=all`);
+                const detailData = await detailRes.json();
+                const total = detailData.metrics.total;
+                const healthy = detailData.metrics.healthy;
+                const score = total > 0 ? Math.round((healthy / total) * 100) : 100;
+                document.getElementById("dash-site-health").innerText = score + "%";
+            } catch (e) {
+                console.error("Failed to load latest audit health for dashboard:", e);
+                document.getElementById("dash-site-health").innerText = "--";
+            }
+        } else {
+            document.getElementById("dash-site-health").innerText = "--";
+        }
         
         // Render recent audit table
         const auditTbody = document.querySelector("#dash-audits-table tbody");
@@ -558,6 +577,14 @@ async function loadAuditHistory() {
 
 let currentAuditPage = 1;
 
+let allPagesCached = [];
+let groupedIssues = { errors: {}, warnings: {}, notices: {} };
+let activeIssuesSeverityFilter = "all";
+let activeIssuesCategoryFilter = "all";
+let activeAuditTab = "overview";
+let activePagesSubtab = "pages";
+let activeStatsMode = "tile";
+
 async function loadAuditDetails(runId, page = 1) {
     currentOpenAuditRunId = runId;
     currentAuditPage = page;
@@ -575,8 +602,10 @@ async function loadAuditDetails(runId, page = 1) {
             url += `&q=${encodeURIComponent(q)}`;
         }
         
+        console.log(`[SEO King] Fetching audit details for run ${runId}: url=${url}`);
         const response = await fetch(url);
         const data = await response.json();
+        console.log("[SEO King] Fetched audit details data:", data);
         
         document.getElementById("audit-detail-container").classList.remove("hidden");
         document.getElementById("audit-detail-domain").innerText = data.run.domain;
@@ -623,6 +652,96 @@ async function loadAuditDetails(runId, page = 1) {
             orphansEl.innerHTML = `<span class="badge ${orphansCount > 0 ? 'badge-warning' : 'badge-success'}" style="cursor:help;" title="${(runDetails.orphan_pages || []).join('\n')}">${orphansCount} Discovered</span>`;
         }
         
+        // Render gauges and bar charts for Overview panel
+        const overallTotal = data.metrics.total;
+        const overallHealthy = data.metrics.healthy;
+        const healthScore = overallTotal > 0 ? Math.round((overallHealthy / overallTotal) * 100) : 100;
+        
+        // Update Overview Site Health Gauge
+        const healthPath = document.getElementById("gauge-health-path");
+        if (healthPath) {
+            const offset = 125.6 - (healthScore / 100) * 125.6;
+            healthPath.style.strokeDashoffset = offset;
+            document.getElementById("gauge-health-val").innerText = healthScore + "%";
+        }
+        
+        // Update Overview Crawled Pages Breakdown bar
+        const barEl = document.getElementById("crawled-pages-bar");
+        const legendEl = document.getElementById("crawled-pages-legend-list");
+        if (barEl && legendEl) {
+            const pHealthy = overallTotal > 0 ? (data.metrics.healthy / overallTotal) * 100 : 0;
+            const pRedirects = overallTotal > 0 ? (data.metrics.redirects / overallTotal) * 100 : 0;
+            const pBroken = overallTotal > 0 ? (data.metrics.broken / overallTotal) * 100 : 0;
+            
+            barEl.innerHTML = `
+                <div style="width: ${pHealthy}%; background-color: var(--success-color);" title="Healthy: ${data.metrics.healthy}"></div>
+                <div style="width: ${pRedirects}%; background-color: var(--warning-color);" title="Redirects: ${data.metrics.redirects}"></div>
+                <div style="width: ${pBroken}%; background-color: var(--danger-color);" title="Broken: ${data.metrics.broken}"></div>
+            `;
+            legendEl.innerHTML = `
+                <div class="legend-row">
+                    <div class="legend-label-wrapper">
+                        <span class="legend-dot" style="background-color: var(--success-color);"></span>
+                        <span>Healthy (2xx)</span>
+                    </div>
+                    <strong>${data.metrics.healthy}</strong>
+                </div>
+                <div class="legend-row">
+                    <div class="legend-label-wrapper">
+                        <span class="legend-dot" style="background-color: var(--warning-color);"></span>
+                        <span>Redirects (3xx)</span>
+                    </div>
+                    <strong>${data.metrics.redirects}</strong>
+                </div>
+                <div class="legend-row">
+                    <div class="legend-label-wrapper">
+                        <span class="legend-dot" style="background-color: var(--danger-color);"></span>
+                        <span>Broken (4xx/5xx)</span>
+                    </div>
+                    <strong>${data.metrics.broken}</strong>
+                </div>
+            `;
+        }
+        
+        // Update Overview AI Search Health Gauge
+        const aiScore = runDetails.ai_search_health !== undefined ? runDetails.ai_search_health : 100;
+        const aiPath = document.getElementById("gauge-ai-path");
+        if (aiPath) {
+            const offset = 125.6 - (aiScore / 100) * 125.6;
+            aiPath.style.strokeDashoffset = offset;
+            document.getElementById("gauge-ai-val").innerText = aiScore + "%";
+            const descEl = document.getElementById("gauge-ai-desc");
+            if (descEl) {
+                descEl.innerText = aiScore < 80 
+                    ? "Warning: Important search pages are blocked from AI agents in robots.txt." 
+                    : "Good: robots.txt allows key pages to be crawled by AI search agents.";
+            }
+        }
+        
+        // Update Overview Blocked from AI Search Agents List
+        const blockedCounts = runDetails.ai_blocked_counts || { "ChatGPT-User": 0, "OAI-SearchBot": 0, "Google-Extended": 0 };
+        const agentsListEl = document.getElementById("ai-blocked-agents-list");
+        if (agentsListEl) {
+            agentsListEl.innerHTML = Object.entries(blockedCounts).map(([agent, count]) => `
+                <li>
+                    <span>${escapeHtml(agent)}</span>
+                    <strong>${count} pages blocked</strong>
+                </li>
+            `).join("");
+        }
+
+        // Fetch ALL pages for the run to process issues categories and stats
+        const allPagesRes = await fetch(`/api/audit/run/${runId}/pages/all`);
+        const allPagesData = await allPagesRes.json();
+        
+        processAllPagesData(allPagesData.pages, data.run);
+        
+        // Initialize chips inside issues tab panel
+        renderIssuesCategoryChips();
+        
+        // Reset/sync tab contents
+        switchAuditTab(activeAuditTab);
+        
         // Update active class on metric card buttons based on current filter type
         document.querySelectorAll(".audit-summary-metrics .sub-metric.filter-btn").forEach(btn => {
             btn.classList.remove("active");
@@ -646,7 +765,1093 @@ async function loadAuditDetails(runId, page = 1) {
         document.getElementById("audit-pg-prev").disabled = (data.current_page === 1);
         document.getElementById("audit-pg-next").disabled = (data.current_page === data.total_pages);
     } catch (e) {
-        console.error("Failed to load audit details:", e);
+        console.error("[SEO King] Failed to load audit details:", e);
+    }
+}
+
+function processAllPagesData(pages, run) {
+    allPagesCached = pages;
+    
+    // Group issues
+    groupedIssues = { errors: {}, warnings: {}, notices: {} };
+    let errorsCount = 0;
+    let warningsCount = 0;
+    
+    pages.forEach(p => {
+        const issues = p.issues || [];
+        issues.forEach(issue => {
+            const issueLower = issue.toLowerCase();
+            let cat = "notices";
+            if (issueLower.includes("broken") || issueLower.includes("error") || issueLower.includes("failure")) {
+                cat = "errors";
+                errorsCount++;
+            } else if (
+                issueLower.includes("missing") || 
+                issueLower.includes("too short") || 
+                issueLower.includes("too long") || 
+                issueLower.includes("thin") || 
+                issueLower.includes("reliance") || 
+                issueLower.includes("alt tags") ||
+                issueLower.includes("blocked")
+            ) {
+                cat = "warnings";
+                warningsCount++;
+            } else {
+                cat = "notices";
+            }
+            
+            if (!groupedIssues[cat][issue]) {
+                groupedIssues[cat][issue] = {
+                    name: issue,
+                    category: cat,
+                    pages: []
+                };
+            }
+            groupedIssues[cat][issue].pages.push(p);
+        });
+    });
+    
+    // Render Overview Spark Cards
+    const errEl = document.getElementById("overview-errors-count");
+    if (errEl) errEl.innerText = errorsCount;
+    const warnEl = document.getElementById("overview-warnings-count");
+    if (warnEl) warnEl.innerText = warningsCount;
+    
+    // Render Top Issues on Overview
+    renderOverviewTopIssues();
+    
+    // Render Thematic card scores (rings)
+    renderThematicRings(pages, run);
+    
+    // Render Statistics Tab
+    renderStatisticsTab(pages, run);
+}
+
+function renderOverviewTopIssues() {
+    const listEl = document.getElementById("overview-top-issues-list");
+    if (!listEl) return;
+    
+    let list = [];
+    Object.values(groupedIssues.errors).forEach(iss => list.push({ ...iss, type: "error" }));
+    Object.values(groupedIssues.warnings).forEach(iss => list.push({ ...iss, type: "warning" }));
+    Object.values(groupedIssues.notices).forEach(iss => list.push({ ...iss, type: "notice" }));
+    
+    list.sort((a, b) => b.pages.length - a.pages.length);
+    
+    if (list.length === 0) {
+        listEl.innerHTML = `<li class="empty-text">No issues found.</li>`;
+        return;
+    }
+    
+    listEl.innerHTML = list.slice(0, 5).map(iss => `
+        <li class="top-issue-item ${iss.type}" onclick="switchAuditTab('issues'); showSingleIssueDetails('${iss.type}', '${escapeHtml(iss.name)}')">
+            <span class="issue-name">${escapeHtml(iss.name)}</span>
+            <span class="issue-count">${iss.pages.length} pages</span>
+        </li>
+    `).join("");
+}
+
+function drawRing(id, score) {
+    const ringEl = document.getElementById(id);
+    const textEl = document.getElementById(id + "-text");
+    if (ringEl && textEl) {
+        ringEl.setAttribute("stroke-dasharray", `${score}, 100`);
+        textEl.innerText = `${score}%`;
+        
+        if (score >= 90) {
+            ringEl.style.stroke = "var(--success-color)";
+        } else if (score >= 50) {
+            ringEl.style.stroke = "var(--warning-color)";
+        } else {
+            ringEl.style.stroke = "var(--danger-color)";
+        }
+    }
+}
+
+function renderThematicRings(pages, run) {
+    const themeRobotsVal = document.querySelector("#tab-panel-overview .theme-card:nth-child(1) .theme-card-val");
+    if (themeRobotsVal) {
+        themeRobotsVal.innerText = run.details && run.details.has_robots_txt ? "Configured" : "Missing";
+    }
+    
+    const nonBroken = pages.filter(p => !p.is_broken).length;
+    const crawlScore = pages.length > 0 ? Math.round((nonBroken / pages.length) * 100) : 100;
+    drawRing("ring-crawlability", crawlScore);
+    
+    let httpsScore = 100;
+    if (run.details && run.details.ssl_details) {
+        httpsScore = run.details.ssl_details.valid ? 100 : 0;
+    } else {
+        const httpsPages = pages.filter(p => p.url.startsWith("https")).length;
+        httpsScore = pages.length > 0 ? Math.round((httpsPages / pages.length) * 100) : 100;
+    }
+    drawRing("ring-https", httpsScore);
+    
+    const loadTimes = pages.map(p => p.details && p.details.load_time !== undefined ? p.details.load_time : 0.5);
+    const avgLoad = loadTimes.reduce((a, b) => a + b, 0) / (loadTimes.length || 1);
+    let perfScore = Math.max(10, Math.min(100, Math.round(100 - (avgLoad * 25))));
+    drawRing("ring-performance", perfScore);
+    
+    const orphansCount = run.details && run.details.orphan_pages ? run.details.orphan_pages.length : 0;
+    const linkingScore = pages.length > 0 ? Math.round((Math.max(0, pages.length - orphansCount) / pages.length) * 100) : 100;
+    drawRing("ring-linking", linkingScore);
+    
+    const schemaCount = pages.filter(p => p.details && (p.details.has_schema || (p.details.schemas && p.details.schemas.length > 0))).length;
+    const markupScore = pages.length > 0 ? Math.round((schemaCount / pages.length) * 100) : 100;
+    drawRing("ring-markup", markupScore);
+}
+
+function openThemeReport(theme) {
+    const overlay = document.getElementById("thematic-report-overlay");
+    const titleEl = document.getElementById("thematic-report-title");
+    const bodyEl = document.getElementById("thematic-report-body-content");
+    if (!overlay || !titleEl || !bodyEl) return;
+    
+    overlay.classList.remove("hidden");
+    
+    let title = "";
+    let body = "";
+    
+    if (theme === "robots") {
+        title = "Robots.txt Analysis";
+        const content = currentRunDetails.robots_txt_content || "No robots.txt file found on domain.";
+        body = `
+            <div class="card">
+                <h3>robots.txt Content</h3>
+                <pre style="background: var(--input-bg); padding: 1rem; border-radius: var(--border-radius-sm); overflow-x: auto; font-family: monospace; font-size: 0.85rem; color: var(--text-primary); margin-top: 1rem; border: 1px solid var(--border-color);">${escapeHtml(content)}</pre>
+            </div>
+            <div class="card" style="margin-top: 1.5rem;">
+                <h3>AI Agents Directives Compliance</h3>
+                <p class="text-secondary text-sm" style="margin: 0.5rem 0 1rem 0;">Review how major AI search crawlers are treated by your robots.txt files.</p>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>AI Bot Agent Name</th>
+                                <th>Status in Robots.txt</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>ChatGPT-User</strong></td>
+                                <td>${(currentRunDetails.ai_blocked_counts && currentRunDetails.ai_blocked_counts["ChatGPT-User"] > 0) ? '<span class="badge badge-danger">Blocked on some paths</span>' : '<span class="badge badge-success">Allowed / Unblocked</span>'}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>OAI-SearchBot</strong></td>
+                                <td>${(currentRunDetails.ai_blocked_counts && currentRunDetails.ai_blocked_counts["OAI-SearchBot"] > 0) ? '<span class="badge badge-danger">Blocked on some paths</span>' : '<span class="badge badge-success">Allowed / Unblocked</span>'}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Google-Extended</strong></td>
+                                <td>${(currentRunDetails.ai_blocked_counts && currentRunDetails.ai_blocked_counts["Google-Extended"] > 0) ? '<span class="badge badge-danger">Blocked on some paths</span>' : '<span class="badge badge-success">Allowed / Unblocked</span>'}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    } 
+    else if (theme === "crawlability") {
+        title = "Crawlability Report";
+        const sitemapCount = currentRunDetails.sitemap_urls_count || 0;
+        const orphanCount = currentRunDetails.orphan_pages ? currentRunDetails.orphan_pages.length : 0;
+        const overlap = Math.max(0, sitemapCount - orphanCount);
+        
+        body = `
+            <div class="overview-widgets-grid">
+                <div class="widget-card">
+                    <h3>Sitemap overlap Venn diagram</h3>
+                    ${generateVennSVG(sitemapCount, allPagesCached.length, overlap)}
+                </div>
+                <div class="widget-card">
+                    <h3>Crawlability Stats</h3>
+                    <ul class="ai-blocked-list">
+                        <li><span>Total Pages Crawled:</span><strong>${allPagesCached.length}</strong></li>
+                        <li><span>Broken Pages:</span><strong class="text-danger">${allPagesCached.filter(p => p.is_broken).length}</strong></li>
+                        <li><span>Redirect Pages:</span><strong class="text-warning">${allPagesCached.filter(p => p.has_redirect).length}</strong></li>
+                        <li><span>Healthy Pages:</span><strong class="text-success">${allPagesCached.filter(p => p.status_code === 200 && !p.is_broken).length}</strong></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="card" style="margin-top: 1.5rem;">
+                <h3>Status Codes list</h3>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>URL Path</th>
+                                <th>HTTP Status</th>
+                                <th>Depth</th>
+                                <th>Load Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${allPagesCached.map(p => `
+                                <tr>
+                                    <td><strong class="word-break">${escapeHtml(p.url)}</strong></td>
+                                    <td><span class="badge ${p.status_code === 200 ? 'badge-success' : p.status_code >= 400 ? 'badge-danger' : 'badge-warning'}">${p.status_code || "ERR"}</span></td>
+                                    <td>${p.details.depth || 0}</td>
+                                    <td>${p.details.load_time || 0}s</td>
+                                </tr>
+                            `).join("")}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    else if (theme === "https") {
+        title = "HTTPS / SSL Report";
+        const ssl = currentRunDetails.ssl_details || { valid: false, error: "No details" };
+        
+        body = `
+            <div class="card">
+                <h3>SSL Certificate Verification</h3>
+                <div class="widget-card" style="margin-top: 1rem; border-left: 5px solid ${ssl.valid ? 'var(--success-color)' : 'var(--danger-color)'}">
+                    <h3 class="${ssl.valid ? 'text-success' : 'text-danger'}" style="font-size: 1.1rem;">
+                        ${ssl.valid ? '✅ SSL Certificate is Valid' : '❌ SSL Certificate is Invalid / Expired'}
+                    </h3>
+                    <p style="margin-top:0.5rem; font-size:0.85rem; color:var(--text-secondary);">${ssl.error || "Domain verified successfully."}</p>
+                </div>
+                
+                <div class="table-container" style="margin-top: 1.5rem;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Parameter</th>
+                                <th>Value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>Issuer</strong></td>
+                                <td>${escapeHtml(ssl.issuer || "Unknown")}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Subject</strong></td>
+                                <td>${escapeHtml(ssl.subject || "Unknown")}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Expiry Date</strong></td>
+                                <td>${escapeHtml(ssl.expiry || "Unknown")}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Days Remaining</strong></td>
+                                <td>${ssl.days_remaining !== undefined ? ssl.days_remaining : "N/A"}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    else if (theme === "performance") {
+        title = "Site Performance Analysis";
+        const loadTimes = allPagesCached.map(p => p.details && p.details.load_time !== undefined ? p.details.load_time : 0.5);
+        const avgLoad = (loadTimes.reduce((a, b) => a + b, 0) / (loadTimes.length || 1)).toFixed(3);
+        
+        body = `
+            <div class="overview-widgets-grid">
+                <div class="widget-card">
+                    <h3>Average Page load time</h3>
+                    <div style="font-family:var(--font-tech); font-size:3rem; font-weight:700; color:var(--primary-color); text-align:center; padding:1.5rem 0;">
+                        ${avgLoad}s
+                    </div>
+                </div>
+                <div class="widget-card">
+                    <h3>Resource distribution</h3>
+                    <ul class="ai-blocked-list">
+                        <li><span>JS scripts total:</span><strong>${allPagesCached.reduce((sum, p) => sum + (p.details.js_count || 0), 0)}</strong></li>
+                        <li><span>CSS stylesheets total:</span><strong>${allPagesCached.reduce((sum, p) => sum + (p.details.css_count || 0), 0)}</strong></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="card" style="margin-top:1.5rem;">
+                <h3>Slowest Pages list</h3>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>URL</th>
+                                <th>Load Time</th>
+                                <th>JS files</th>
+                                <th>CSS files</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${allPagesCached.map(p => `
+                                <tr>
+                                    <td><strong class="word-break">${escapeHtml(p.url)}</strong></td>
+                                    <td><span class="${(p.details.load_time || 0.5) > 1.5 ? 'text-danger font-semibold' : ''}">${p.details.load_time || 0.5}s</span></td>
+                                    <td>${p.details.js_count || 0}</td>
+                                    <td>${p.details.css_count || 0}</td>
+                                </tr>
+                            `).join("")}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    else if (theme === "linking") {
+        title = "Internal Linking Audit";
+        const orphans = currentRunDetails.orphan_pages || [];
+        
+        body = `
+            <div class="overview-widgets-grid">
+                <div class="widget-card">
+                    <h3>Orphan Pages count</h3>
+                    <div style="font-family:var(--font-tech); font-size:3rem; font-weight:700; color:${orphans.length > 0 ? 'var(--warning-color)' : 'var(--success-color)'}; text-align:center; padding:1.5rem 0;">
+                        ${orphans.length}
+                    </div>
+                </div>
+                <div class="widget-card">
+                    <h3>Linkgraph metrics</h3>
+                    <ul class="ai-blocked-list">
+                        <li><span>Total Crawl links:</span><strong>${allPagesCached.reduce((sum, p) => sum + (p.details.links ? p.details.links.total || 0 : 0), 0)}</strong></li>
+                        <li><span>Orphan Pages in Sitemap:</span><strong class="${orphans.length > 0 ? 'text-warning' : ''}">${orphans.length}</strong></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="card" style="margin-top:1.5rem;">
+                <h3>Orphan Pages URL Details</h3>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Orphan URL</th>
+                                <th>In Sitemap</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${orphans.length === 0 ? '<tr><td colspan="2" class="empty-state">No orphan pages discovered.</td></tr>' : 
+                            orphans.map(u => `
+                                <tr>
+                                    <td><strong class="word-break">${escapeHtml(u)}</strong></td>
+                                    <td><span class="badge badge-success">Yes</span></td>
+                                </tr>
+                            `).join("")}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    else if (theme === "markup") {
+        title = "Structured Data & Markups";
+        const schemasFound = {};
+        allPagesCached.forEach(p => {
+            const schemas = p.details.schemas || [];
+            schemas.forEach(s => {
+                schemasFound[s] = (schemasFound[s] || 0) + 1;
+            });
+        });
+        
+        body = `
+            <div class="card">
+                <h3>Schema type distribution</h3>
+                <div class="table-container" style="margin-top:1rem;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Schema Type / Markup format</th>
+                                <th>Pages matching</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${Object.keys(schemasFound).length === 0 ? '<tr><td colspan="2" class="empty-state">No structured schema types identified.</td></tr>' :
+                            Object.entries(schemasFound).map(([s, count]) => `
+                                <tr>
+                                    <td><strong>${escapeHtml(s)}</strong></td>
+                                    <td>${count} pages</td>
+                                </tr>
+                            `).join("")}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    
+    titleEl.innerText = title;
+    bodyEl.innerHTML = body;
+}
+
+function closeThematicReport() {
+    const overlay = document.getElementById("thematic-report-overlay");
+    if (overlay) {
+        overlay.classList.add("hidden");
+    }
+}
+
+function switchAuditTab(tabName) {
+    activeAuditTab = tabName;
+    
+    // Update active state of buttons
+    document.querySelectorAll(".audit-tabs-nav .audit-tab-btn").forEach(btn => {
+        if (btn.getAttribute("data-tab") === tabName) {
+            btn.classList.add("active");
+        } else {
+            btn.classList.remove("active");
+        }
+    });
+    
+    // Show/hide panels
+    const panels = [
+        { name: "overview", id: "tab-panel-overview" },
+        { name: "issues", id: "tab-panel-issues" },
+        { name: "pages", id: "tab-panel-pages" },
+        { name: "statistics", id: "tab-panel-statistics" },
+        { name: "compare", id: "tab-panel-compare" }
+    ];
+    
+    panels.forEach(p => {
+        const el = document.getElementById(p.id);
+        if (el) {
+            if (p.name === tabName) {
+                el.classList.remove("hidden");
+            } else {
+                el.classList.add("hidden");
+            }
+        }
+    });
+    
+    // Perform actions when tab is selected
+    if (tabName === "issues") {
+        goBackToIssuesList();
+        renderIssuesTabList();
+    } else if (tabName === "compare") {
+        populateCompareRuns();
+    } else if (tabName === "statistics") {
+        switchStatsMode(activeStatsMode);
+    }
+}
+
+function switchPagesSubtab(subtabName) {
+    activePagesSubtab = subtabName;
+    document.querySelectorAll(".crawled-pages-subtabs .pages-subtab-btn").forEach(btn => {
+        if (btn.getAttribute("data-subtab") === subtabName) {
+            btn.classList.add("active");
+        } else {
+            btn.classList.remove("active");
+        }
+    });
+    
+    const viewList = document.getElementById("pages-subview-list");
+    const viewStructure = document.getElementById("pages-subview-structure");
+    
+    if (subtabName === "pages") {
+        if (viewList) viewList.classList.remove("hidden");
+        if (viewStructure) viewStructure.classList.add("hidden");
+    } else {
+        if (viewList) viewList.classList.add("hidden");
+        if (viewStructure) viewStructure.classList.remove("hidden");
+        renderSitemapsStructureTable();
+    }
+}
+
+function switchStatsMode(mode) {
+    activeStatsMode = mode;
+    document.querySelectorAll(".stats-toggle-bar .stats-toggle-btn").forEach(btn => {
+        if (btn.getAttribute("data-mode") === mode) {
+            btn.classList.add("active");
+        } else {
+            btn.classList.remove("active");
+        }
+    });
+    
+    const tileView = document.getElementById("stats-tiles-view");
+    const graphView = document.getElementById("stats-graph-view-panel");
+    
+    if (mode === "tile") {
+        if (tileView) tileView.classList.remove("hidden");
+        if (graphView) graphView.classList.add("hidden");
+    } else {
+        if (tileView) tileView.classList.add("hidden");
+        if (graphView) graphView.classList.remove("hidden");
+        drawStatsComparativeGraph(allPagesCached);
+    }
+}
+
+function renderSitemapsStructureTable() {
+    const tbody = document.querySelector("#sitemaps-structure-table tbody");
+    if (!tbody) return;
+    
+    const sitemaps = currentRunDetails.sitemaps_found || [];
+    if (sitemaps.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No XML sitemaps crawled.</td></tr>`;
+        return;
+    }
+    
+    tbody.innerHTML = sitemaps.map(u => `
+        <tr>
+            <td><strong class="word-break">${escapeHtml(u)}</strong></td>
+            <td><span class="badge badge-success">Live (Status 200)</span></td>
+            <td>XML Sitemap Index / List</td>
+        </tr>
+    `).join("");
+}
+
+function renderIssuesCategoryChips() {
+    const container = document.getElementById("issues-cats-chips");
+    if (!container) return;
+    
+    if (container.children.length > 0) return;
+    
+    const categories = [
+        { id: "all", label: "All" },
+        { id: "ai", label: "AI Search" },
+        { id: "crawl", label: "Crawlability" },
+        { id: "content", label: "Content" },
+        { id: "meta", label: "Meta tags" }
+    ];
+    
+    container.innerHTML = categories.map(cat => `
+        <span class="category-chip ${cat.id === activeIssuesCategoryFilter ? 'active' : ''}" 
+              data-category="${cat.id}" 
+              onclick="setIssuesCategoryFilter('${cat.id}', this)">
+            ${cat.label}
+        </span>
+    `).join("");
+}
+
+function setIssuesCategoryFilter(catId, chipEl) {
+    activeIssuesCategoryFilter = catId;
+    document.querySelectorAll("#issues-cats-chips .category-chip").forEach(chip => {
+        chip.classList.remove("active");
+    });
+    if (chipEl) chipEl.classList.add("active");
+    renderIssuesTabList();
+}
+
+function setIssuesSeverityFilter(sevId, btnEl) {
+    activeIssuesSeverityFilter = sevId;
+    document.querySelectorAll(".issues-severity-filters .severity-btn").forEach(btn => {
+        btn.classList.remove("active");
+    });
+    if (btnEl) btnEl.classList.add("active");
+    renderIssuesTabList();
+}
+
+function filterIssuesList() {
+    const q = document.getElementById("issues-search").value.toLowerCase();
+    const container = document.getElementById("issues-accordion-container");
+    if (!container) return;
+    
+    const items = container.querySelectorAll(".issue-accordion-item");
+    items.forEach(item => {
+        const title = item.querySelector(".issue-header-title").innerText.toLowerCase();
+        if (title.includes(q)) {
+            item.classList.remove("hidden");
+        } else {
+            item.classList.add("hidden");
+        }
+    });
+}
+
+function renderIssuesTabList() {
+    const container = document.getElementById("issues-accordion-container");
+    if (!container) return;
+    
+    let html = "";
+    
+    const severities = activeIssuesSeverityFilter === "all" 
+        ? ["errors", "warnings", "notices"] 
+        : [activeIssuesSeverityFilter];
+        
+    let matchesFound = false;
+    
+    severities.forEach(sev => {
+        const issues = Object.values(groupedIssues[sev] || {});
+        issues.forEach(iss => {
+            if (!matchCategoryFilter(iss.name, activeIssuesCategoryFilter)) return;
+            
+            matchesFound = true;
+            const label = sev === "errors" ? "Error" : sev === "warnings" ? "Warning" : "Notice";
+            
+            html += `
+                <div class="issue-accordion-item">
+                    <div class="issue-accordion-header" onclick="toggleIssueAccordion(this)">
+                        <div class="issue-header-left">
+                            <span class="badge ${sev === 'errors' ? 'badge-danger' : sev === 'warnings' ? 'badge-warning' : 'badge-success'}">${label}</span>
+                            <span class="issue-header-title">${escapeHtml(iss.name)}</span>
+                        </div>
+                        <span class="issue-header-count">${iss.pages.length} pages</span>
+                    </div>
+                    <div class="issue-accordion-body hidden">
+                        <div class="issue-desc-box">
+                            This issue affects ${iss.pages.length} crawled pages. Review the diagnostic breakdown or fix details.
+                        </div>
+                        <button class="btn btn-sm btn-primary" onclick="showSingleIssueDetails('${sev}', '${escapeHtml(iss.name)}')">View Affected Pages</button>
+                    </div>
+                </div>
+            `;
+        });
+    });
+    
+    if (!matchesFound) {
+        container.innerHTML = `<div class="empty-state">No matching issues found.</div>`;
+    } else {
+        container.innerHTML = html;
+    }
+}
+
+function matchCategoryFilter(issueName, cat) {
+    if (cat === "all") return true;
+    const name = issueName.toLowerCase();
+    if (cat === "ai") {
+        return name.includes("ai") || name.includes("bot");
+    }
+    if (cat === "crawl") {
+        return name.includes("broken") || name.includes("redirect") || name.includes("status") || name.includes("failure") || name.includes("orphan") || name.includes("robots");
+    }
+    if (cat === "content") {
+        return name.includes("thin") || name.includes("words") || name.includes("hierarchy") || name.includes("h1") || name.includes("anchor") || name.includes("alt") || name.includes("image");
+    }
+    if (cat === "meta") {
+        return name.includes("title") || name.includes("description") || name.includes("canonical") || name.includes("noindex");
+    }
+    return false;
+}
+
+function toggleIssueAccordion(headerEl) {
+    const body = headerEl.nextElementSibling;
+    if (body) {
+        body.classList.toggle("hidden");
+    }
+}
+
+function showSingleIssueDetails(sev, issueName) {
+    const lv = document.getElementById("issues-list-view");
+    if (lv) lv.classList.add("hidden");
+    const singleView = document.getElementById("single-issue-detail-view");
+    if (singleView) singleView.classList.remove("hidden");
+    
+    const issue = groupedIssues[sev][issueName];
+    if (!issue) return;
+    
+    const tEl = document.getElementById("single-issue-title");
+    if (tEl) tEl.innerText = issue.name;
+    const badge = document.getElementById("single-issue-severity-badge");
+    if (badge) {
+        badge.innerText = sev.toUpperCase();
+        badge.className = `badge ${sev === 'errors' ? 'badge-danger' : sev === 'warnings' ? 'badge-warning' : 'badge-success'}`;
+    }
+    
+    const totalPages = allPagesCached.length;
+    const affected = issue.pages.length;
+    const clean = totalPages - affected;
+    
+    const fc = document.getElementById("single-issue-failed-count");
+    if (fc) fc.innerText = affected;
+    const sc = document.getElementById("single-issue-success-count");
+    if (sc) sc.innerText = clean;
+    
+    const pct = totalPages > 0 ? (affected / totalPages) * 100 : 0;
+    const fill = document.getElementById("single-issue-progress-fill");
+    if (fill) fill.style.width = pct + "%";
+    
+    let fixInfo = "Review the affected pages below and fix their metadata or linkage.";
+    const lower = issueName.toLowerCase();
+    if (lower.includes("broken")) {
+        fixInfo = "Fix the source link or restore the page path to return a 200 status code. Update outbound references to point to valid endpoints.";
+    } else if (lower.includes("redirect")) {
+        fixInfo = "Resolve redirect chains or update links to point directly to the destination URL, preserving crawler efficiency.";
+    } else if (lower.includes("title tag")) {
+        fixInfo = "Ensure each page has a unique, descriptive <title> tag between 30 and 60 characters.";
+    } else if (lower.includes("meta description")) {
+        fixInfo = "Provide a unique, relevant meta description tag of 120-160 characters to improve CTR in search results.";
+    } else if (lower.includes("canonical")) {
+        fixInfo = "Configure a valid absolute <link rel='canonical'> to designate the preferred version of the content.";
+    } else if (lower.includes("h1 header")) {
+        fixInfo = "Add a single primary <h1> heading to structure the page content semantically.";
+    } else if (lower.includes("hierarchy jump")) {
+        fixInfo = "Maintain strict descending order of headings (e.g. H1 followed by H2, then H3) without skipping levels.";
+    } else if (lower.includes("thin content")) {
+        fixInfo = "Increase content depth with relevant text to exceed 300 words. Address thin content penalty risks.";
+    } else if (lower.includes("alt tags") || lower.includes("image")) {
+        fixInfo = "Add descriptive 'alt' attributes to all <img> tags to describe visual content for accessibility and image search.";
+    } else if (lower.includes("blocked") || lower.includes("robots")) {
+        fixInfo = "Update your robots.txt directives to permit crawling by ChatGPT, Google-Extended, and other search engines.";
+    }
+    
+    const fixEl = document.getElementById("single-issue-how-to-fix");
+    if (fixEl) fixEl.innerText = fixInfo;
+    
+    const tbody = document.querySelector("#single-issue-pages-table tbody");
+    if (tbody) {
+        tbody.innerHTML = issue.pages.map(p => `
+            <tr>
+                <td><strong class="word-break">${escapeHtml(p.url)}</strong></td>
+                <td><span class="badge ${p.status_code === 200 ? 'badge-success' : p.status_code >= 400 ? 'badge-danger' : 'badge-warning'}">${p.status_code || "ERR"}</span></td>
+                <td><button class="btn btn-xs btn-primary" onclick="event.stopPropagation(); triggerReaudit(${p.id})">Reaudit</button></td>
+            </tr>
+        `).join("");
+    }
+}
+
+function goBackToIssuesList() {
+    const sv = document.getElementById("single-issue-detail-view");
+    if (sv) sv.classList.add("hidden");
+    const lv = document.getElementById("issues-list-view");
+    if (lv) lv.classList.remove("hidden");
+}
+
+async function populateCompareRuns() {
+    const select1 = document.getElementById("compare-run-1");
+    const select2 = document.getElementById("compare-run-2");
+    if (!select1 || !select2) return;
+    
+    if (select1.getAttribute("data-populated-for") === String(currentOpenAuditRunId)) {
+        return;
+    }
+    
+    try {
+        const res = await fetch("/api/audit/runs");
+        const runs = await res.json();
+        
+        const relevantRuns = runs.filter(r => r.domain === currentRunDetails.domain || r.id === currentOpenAuditRunId);
+        
+        const optionsHtml = relevantRuns.map(r => `
+            <option value="${r.id}" ${r.id === currentOpenAuditRunId ? 'selected' : ''}>
+                Run #${r.id} (${new Date(r.started_at).toLocaleDateString()} - ${r.status})
+            </option>
+        `).join("");
+        
+        select1.innerHTML = optionsHtml;
+        select2.innerHTML = optionsHtml;
+        
+        if (relevantRuns.length > 1) {
+            const currentIdx = relevantRuns.findIndex(r => r.id === currentOpenAuditRunId);
+            const otherIdx = currentIdx === 0 ? 1 : 0;
+            select2.value = relevantRuns[otherIdx].id;
+        }
+        
+        select1.setAttribute("data-populated-for", currentOpenAuditRunId);
+        
+        runComparisonChecks();
+    } catch (e) {
+        console.error("Failed to populate compare dropdowns:", e);
+    }
+}
+
+async function runComparisonChecks() {
+    const select1 = document.getElementById("compare-run-1");
+    const select2 = document.getElementById("compare-run-2");
+    const tbody = document.querySelector("#comparison-metrics-table tbody");
+    if (!select1 || !select2 || !tbody) return;
+    
+    const id1 = select1.value;
+    const id2 = select2.value;
+    if (!id1 || !id2) return;
+    
+    try {
+        const res = await fetch(`/api/audit/compare?run_id_1=${id1}&run_id_2=${id2}`);
+        if (!res.ok) throw new Error("Comparison failed");
+        const data = await res.json();
+        
+        const r1 = data.run1.stats;
+        const r2 = data.run2.stats;
+        
+        const metrics = [
+            { label: "Total Pages Crawled", key: "total", isCount: true },
+            { label: "Site Health Score", key: "health_score", isPercent: true },
+            { label: "Healthy Pages (200)", key: "healthy", isCount: true },
+            { label: "Broken Pages (4xx/5xx)", key: "broken", isCount: true, isIssue: true },
+            { label: "Redirects (3xx)", key: "redirects", isCount: true, isIssue: true },
+            { label: "Total Errors", key: "errors", isCount: true, isIssue: true },
+            { label: "Total Warnings", key: "warnings", isCount: true, isIssue: true },
+            { label: "Total Notices", key: "notices", isCount: true, isIssue: true }
+        ];
+        
+        tbody.innerHTML = metrics.map(m => {
+            const v1 = r1[m.key] || 0;
+            const v2 = r2[m.key] || 0;
+            const diff = v2 - v1;
+            
+            let fixed = "--";
+            let newDiff = "--";
+            
+            if (m.key === "health_score") {
+                if (diff > 0) fixed = `+${diff}%`;
+                else if (diff < 0) newDiff = `${diff}%`;
+            } else if (m.key === "healthy") {
+                if (diff > 0) fixed = `+${diff}`;
+                else if (diff < 0) newDiff = `${diff}`;
+            } else {
+                if (diff < 0) fixed = `${Math.abs(diff)} fixed`;
+                else if (diff > 0) newDiff = `+${diff} new`;
+            }
+            
+            const v1Str = m.isPercent ? `${v1}%` : v1;
+            const v2Str = m.isPercent ? `${v2}%` : v2;
+            
+            return `
+                <tr>
+                    <td><strong>${m.label}</strong></td>
+                    <td>${v1Str}</td>
+                    <td>${v2Str}</td>
+                    <td class="text-success">${fixed}</td>
+                    <td class="text-danger">${newDiff}</td>
+                </tr>
+            `;
+        }).join("");
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-state text-danger">Failed to calculate comparison metrics.</td></tr>`;
+    }
+}
+
+function renderStatisticsTab(pages, run) {
+    // 1. Status Codes
+    const brokenPages = pages.filter(p => p.is_broken).length;
+    const brokenPct = pages.length > 0 ? Math.round((brokenPages / pages.length) * 100) : 0;
+    const statusNum = document.getElementById("stat-tile-status-num");
+    if (statusNum) statusNum.innerText = brokenPct + "%";
+    
+    const statusCounts = {};
+    pages.forEach(p => {
+        const code = p.status_code || "ERR";
+        statusCounts[code] = (statusCounts[code] || 0) + 1;
+    });
+    
+    const statusList = document.getElementById("stat-tile-status-list");
+    if (statusList) {
+        statusList.innerHTML = Object.entries(statusCounts).map(([code, count]) => {
+            const pct = pages.length > 0 ? (count / pages.length) * 100 : 0;
+            const colorClass = code === 200 ? "bg-success" : code >= 400 ? "bg-danger" : "bg-warning";
+            return `
+                <div class="stat-row-progress-container">
+                    <div class="stat-row"><span>Status ${code}:</span><strong>${count} (${Math.round(pct)}%)</strong></div>
+                    <div class="stat-row-progress-bar"><div class="stat-row-progress-fill ${colorClass}" style="width: ${pct}%"></div></div>
+                </div>
+            `;
+        }).join("");
+    }
+    
+    // 2. Sitemap vs Crawled
+    const sitemapCount = run.details && run.details.sitemap_urls_count !== undefined ? run.details.sitemap_urls_count : 0;
+    const sitemapsFound = run.details && run.details.sitemaps_found ? run.details.sitemaps_found.length : 0;
+    const orphanCount = run.details && run.details.orphan_pages ? run.details.orphan_pages.length : 0;
+    const overlap = Math.max(0, sitemapCount - orphanCount);
+    
+    const sitemapNum = document.getElementById("stat-tile-sitemap-num");
+    if (sitemapNum) sitemapNum.innerText = sitemapCount;
+    const sitemapList = document.getElementById("stat-tile-sitemap-list");
+    if (sitemapList) {
+        sitemapList.innerHTML = `
+            <div class="stat-row"><span>XML Sitemaps:</span><strong>${sitemapsFound} found</strong></div>
+            <div class="stat-row"><span>Orphan Sitemap Pages:</span><strong>${orphanCount}</strong></div>
+            <div class="stat-row"><span>Crawled & Sitemap overlap:</span><strong>${overlap}</strong></div>
+        `;
+    }
+    
+    // 3. Crawl Depth
+    const deepPages = pages.filter(p => p.details && p.details.depth > 3).length;
+    const deepPct = pages.length > 0 ? Math.round((deepPages / pages.length) * 100) : 0;
+    const depthNum = document.getElementById("stat-tile-depth-num");
+    if (depthNum) depthNum.innerText = deepPct + "%";
+    
+    const depthCounts = {};
+    pages.forEach(p => {
+        const d = p.details && p.details.depth !== undefined ? p.details.depth : 0;
+        depthCounts[d] = (depthCounts[d] || 0) + 1;
+    });
+    
+    const depthList = document.getElementById("stat-tile-depth-list");
+    if (depthList) {
+        depthList.innerHTML = Object.entries(depthCounts).map(([depth, count]) => {
+            const pct = pages.length > 0 ? (count / pages.length) * 100 : 0;
+            return `
+                <div class="stat-row-progress-container">
+                    <div class="stat-row"><span>Click Depth ${depth}:</span><strong>${count} pages (${Math.round(pct)}%)</strong></div>
+                    <div class="stat-row-progress-bar"><div class="stat-row-progress-fill bg-info" style="width: ${pct}%"></div></div>
+                </div>
+            `;
+        }).join("");
+    }
+    
+    // 4. Inbound Link counts
+    const oneLinkPages = pages.filter(p => p.details && p.details.incoming_links_count === 1).length;
+    const oneLinkPct = pages.length > 0 ? Math.round((oneLinkPages / pages.length) * 100) : 0;
+    const linksNum = document.getElementById("stat-tile-links-num");
+    if (linksNum) linksNum.innerText = oneLinkPct + "%";
+    
+    const zeroLinks = pages.filter(p => !p.details || !p.details.incoming_links_count).length;
+    const multiLinks = pages.filter(p => p.details && p.details.incoming_links_count > 1).length;
+    const linksList = document.getElementById("stat-tile-links-list");
+    if (linksList) {
+        linksList.innerHTML = `
+            <div class="stat-row"><span>0 incoming links:</span><strong>${zeroLinks} pages</strong></div>
+            <div class="stat-row"><span>1 incoming link:</span><strong>${oneLinkPages} pages</strong></div>
+            <div class="stat-row"><span>2+ incoming links:</span><strong>${multiLinks} pages</strong></div>
+        `;
+    }
+    
+    // 5. Markup Types
+    const noMarkupPages = pages.filter(p => p.details && !p.details.has_schema && !p.details.has_og && !p.details.has_twitter).length;
+    const noMarkupPct = pages.length > 0 ? Math.round((noMarkupPages / pages.length) * 100) : 0;
+    const markupNum = document.getElementById("stat-tile-markup-num");
+    if (markupNum) markupNum.innerText = noMarkupPct + "%";
+    
+    const schemaCount = pages.filter(p => p.details && p.details.has_schema).length;
+    const ogCount = pages.filter(p => p.details && p.details.has_og).length;
+    const twitterCount = pages.filter(p => p.details && p.details.has_twitter).length;
+    const markupList = document.getElementById("stat-tile-markup-list");
+    if (markupList) {
+        markupList.innerHTML = `
+            <div class="stat-row"><span>Schema (JSON-LD/Microdata):</span><strong>${schemaCount} pages</strong></div>
+            <div class="stat-row"><span>Open Graph:</span><strong>${ogCount} pages</strong></div>
+            <div class="stat-row"><span>Twitter Card:</span><strong>${twitterCount} pages</strong></div>
+        `;
+    }
+    
+    // 6. Canonicalization
+    const noCanonicalPages = pages.filter(p => p.details && !p.details.canonical_url).length;
+    const noCanonicalPct = pages.length > 0 ? Math.round((noCanonicalPages / pages.length) * 100) : 0;
+    const canonicalNum = document.getElementById("stat-tile-canonical-num");
+    if (canonicalNum) canonicalNum.innerText = noCanonicalPct + "%";
+    
+    const canonicalSelf = pages.filter(p => p.details && p.details.canonical_url === p.url).length;
+    const canonicalOther = pages.filter(p => p.details && p.details.canonical_url && p.details.canonical_url !== p.url).length;
+    const canonicalList = document.getElementById("stat-tile-canonical-list");
+    if (canonicalList) {
+        canonicalList.innerHTML = `
+            <div class="stat-row"><span>Self-referencing:</span><strong>${canonicalSelf} pages</strong></div>
+            <div class="stat-row"><span>Pointing to other:</span><strong>${canonicalOther} pages</strong></div>
+            <div class="stat-row"><span>Missing canonical:</span><strong>${noCanonicalPages} pages</strong></div>
+        `;
+    }
+}
+
+function drawStatsComparativeGraph(pages) {
+    const svg = document.getElementById("stats-comparative-svg");
+    if (!svg) return;
+    
+    const chartPages = pages.slice(0, 10);
+    if (chartPages.length === 0) {
+        svg.innerHTML = `<text x="400" y="160" text-anchor="middle" fill="var(--text-muted)">No page metrics available to plot.</text>`;
+        return;
+    }
+    
+    const margin = { top: 40, right: 40, bottom: 60, left: 60 };
+    const width = 800;
+    const height = 320;
+    const chartWidth = width - margin.left - margin.right;
+    const chartHeight = height - margin.top - margin.bottom;
+    
+    let maxVal = 5;
+    chartPages.forEach(p => {
+        const js = p.details && p.details.js_count !== undefined ? p.details.js_count : 0;
+        const css = p.details && p.details.css_count !== undefined ? p.details.css_count : 0;
+        const links = p.details && p.details.incoming_links_count !== undefined ? p.details.incoming_links_count : 0;
+        maxVal = Math.max(maxVal, js, css, links);
+    });
+    maxVal = Math.ceil(maxVal * 1.2);
+    
+    const barWidth = (chartWidth / chartPages.length) * 0.7;
+    const groupGap = (chartWidth / chartPages.length) * 0.3;
+    
+    let html = "";
+    
+    for (let i = 0; i <= 4; i++) {
+        const val = Math.round((maxVal / 4) * i);
+        const y = margin.top + chartHeight - (chartHeight / 4) * i;
+        html += `
+            <line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="var(--border-color)" stroke-dasharray="4,4" />
+            <text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" fill="var(--text-muted)" font-size="10">${val}</text>
+        `;
+    }
+    
+    html += `
+        <line x1="${margin.left}" y1="${margin.top + chartHeight}" x2="${width - margin.right}" y2="${margin.top + chartHeight}" stroke="var(--text-muted)" stroke-width="2" />
+    `;
+    
+    chartPages.forEach((p, idx) => {
+        const xStart = margin.left + idx * (chartWidth / chartPages.length) + groupGap / 2;
+        
+        const js = p.details && p.details.js_count !== undefined ? p.details.js_count : 0;
+        const css = p.details && p.details.css_count !== undefined ? p.details.css_count : 0;
+        const links = p.details && p.details.incoming_links_count !== undefined ? p.details.incoming_links_count : 0;
+        
+        const jsH = (js / maxVal) * chartHeight;
+        const cssH = (css / maxVal) * chartHeight;
+        const linksH = (links / maxVal) * chartHeight;
+        
+        const w = barWidth / 3;
+        
+        html += `
+            <rect x="${xStart}" y="${margin.top + chartHeight - jsH}" width="${w}" height="${jsH}" fill="var(--indigo-color)" rx="2" title="JS: ${js}" />
+        `;
+        html += `
+            <rect x="${xStart + w}" y="${margin.top + chartHeight - cssH}" width="${w}" height="${cssH}" fill="var(--warning-color)" rx="2" title="CSS: ${css}" />
+        `;
+        html += `
+            <rect x="${xStart + w * 2}" y="${margin.top + chartHeight - linksH}" width="${w}" height="${linksH}" fill="var(--success-color)" rx="2" title="Links: ${links}" />
+        `;
+        
+        const labelText = p.url.replace(/^https?:\/\/(www\.)?/, "").substring(0, 15) + "...";
+        html += `
+            <text x="${xStart + barWidth / 2}" y="${margin.top + chartHeight + 20}" text-anchor="middle" fill="var(--text-secondary)" font-size="9" transform="rotate(15, ${xStart + barWidth / 2}, ${margin.top + chartHeight + 20})">${escapeHtml(labelText)}</text>
+        `;
+    });
+    
+    html += `
+        <g transform="translate(${width - 450}, 15)" font-size="10">
+            <rect x="0" y="0" width="10" height="10" fill="var(--indigo-color)" rx="1"/>
+            <text x="15" y="9" fill="var(--text-secondary)">JS scripts</text>
+            
+            <rect x="120" y="0" width="10" height="10" fill="var(--warning-color)" rx="1"/>
+            <text x="135" y="9" fill="var(--text-secondary)">CSS stylesheets</text>
+            
+            <rect x="240" y="0" width="10" height="10" fill="var(--success-color)" rx="1"/>
+            <text x="255" y="9" fill="var(--text-secondary)">Inbound Links</text>
+        </g>
+    `;
+    
+    svg.innerHTML = html;
+}
+
+function generateVennSVG(sitemapCount, crawledCount, overlap) {
+    return `
+    <svg viewBox="0 0 360 200" style="width:100%; max-width:400px; margin: 0 auto; display:block;">
+        <circle cx="140" cy="100" r="70" fill="rgba(14, 165, 233, 0.4)" stroke="var(--indigo-color)" stroke-width="2" />
+        <circle cx="220" cy="100" r="70" fill="rgba(16, 185, 129, 0.4)" stroke="var(--success-color)" stroke-width="2" />
+        
+        <text x="90" y="100" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">${sitemapCount - overlap}</text>
+        <text x="90" y="120" text-anchor="middle" fill="var(--text-secondary)" font-size="10">Sitemap Only</text>
+        
+        <text x="270" y="100" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">${crawledCount - overlap}</text>
+        <text x="270" y="120" text-anchor="middle" fill="var(--text-secondary)" font-size="10">Crawled Only</text>
+        
+        <text x="180" y="100" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">${overlap}</text>
+        <text x="180" y="120" text-anchor="middle" fill="var(--text-secondary)" font-size="10">In Both</text>
+    </svg>
+    `;
+}
+
+function renderBlockedAIBots(p) {
+    const bots = (p.details && p.details.blocked_ai_bots) || [];
+    if (bots.length === 0) {
+        return `<span class="badge badge-success">None</span>`;
+    }
+    return bots.map(b => `<span class="badge badge-danger" style="margin-right:2px; font-size:10px;">${escapeHtml(b)}</span>`).join("");
+}
+
+async function triggerReaudit(pageId) {
+    try {
+        const response = await fetch(`/api/audit/page/${pageId}/reaudit`, { method: "POST" });
+        if (response.ok) {
+            alert("Reaudit complete.");
+            if (currentOpenAuditRunId) {
+                await loadAuditDetails(currentOpenAuditRunId, currentAuditPage);
+            }
+        } else {
+            const data = await response.json();
+            alert("Reaudit failed: " + (data.detail || "Unknown error"));
+        }
+    } catch (e) {
+        alert("Error requesting page reaudit.");
     }
 }
 
@@ -657,14 +1862,19 @@ async function changeAuditPage(direction) {
 
 function renderAuditPageMetrics(metrics) {
     if (!metrics) return;
-    document.getElementById("audit-metric-total").innerText = metrics.total;
-    document.getElementById("audit-metric-broken").innerText = metrics.broken;
-    document.getElementById("audit-metric-redirects").innerText = metrics.redirects;
-    document.getElementById("audit-metric-healthy").innerText = metrics.healthy;
+    const totalEl = document.getElementById("audit-metric-total");
+    if (totalEl) totalEl.innerText = metrics.total;
+    const brokenEl = document.getElementById("audit-metric-broken");
+    if (brokenEl) brokenEl.innerText = metrics.broken;
+    const redirectsEl = document.getElementById("audit-metric-redirects");
+    if (redirectsEl) redirectsEl.innerText = metrics.redirects;
+    const healthyEl = document.getElementById("audit-metric-healthy");
+    if (healthyEl) healthyEl.innerText = metrics.healthy;
 }
 
 function renderAuditPagesTable(pages) {
     const tbody = document.querySelector("#audit-pages-table tbody");
+    if (!tbody) return;
     if (pages.length === 0) {
         tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No crawled pages found in this audit.</td></tr>`;
         return;
@@ -673,23 +1883,33 @@ function renderAuditPagesTable(pages) {
     tbody.innerHTML = pages.map(p => {
         const issuesCount = p.issues ? p.issues.length : 0;
         const issuesHtml = p.issues && p.issues.length > 0
-            ? p.issues.slice(0, 2).map(i => `<span class="pill-issue warning">${escapeHtml(i)}</span>`).join("") + (p.issues.length > 2 ? `<span class="pill-issue more">+${p.issues.length - 2} more</span>` : "")
+            ? p.issues.slice(0, 2).map(i => {
+                const isErr = i.toLowerCase().includes("broken") || i.toLowerCase().includes("error") || i.toLowerCase().includes("failure");
+                const catClass = isErr ? "danger" : "warning";
+                return `<span class="pill-issue ${catClass}">${escapeHtml(i)}</span>`;
+              }).join("") + (p.issues.length > 2 ? `<span class="pill-issue more">+${p.issues.length - 2} more</span>` : "")
             : `<span class="pill-issue success">No Issues</span>`;
+            
+        const ilr = p.details && p.details.ilr !== undefined ? p.details.ilr : 10;
+        const depth = p.details && p.details.depth !== undefined ? p.details.depth : 0;
             
         return `
             <tr class="audit-page-row" data-page-id="${p.id}" onclick="toggleAuditPageDetails(${p.id})">
+                <td><span class="badge badge-info">${ilr}</span></td>
                 <td class="word-break">
                     <div class="url-cell-wrapper">
                         <span class="chevron-icon" id="chevron-${p.id}">▶</span>
-                        <strong>${escapeHtml(p.url)}</strong>
+                        <div style="display:inline-block; vertical-align:top; margin-left: 5px;">
+                            <strong>${escapeHtml(p.url)}</strong>
+                            <div class="text-muted text-xs" style="margin-top:2px; font-size:10px;">${escapeHtml(p.title_tag || "No Title")}</div>
+                        </div>
                     </div>
                 </td>
                 <td><span class="badge ${p.status_code === 200 ? 'badge-success' : p.status_code >= 400 ? 'badge-danger' : 'badge-warning'}">${p.status_code || "ERR"}</span></td>
-                <td>${escapeHtml(p.title_tag) || `<span class="text-danger">Missing</span>`}</td>
-                <td>${escapeHtml(p.meta_description) || `<span class="text-warning">Missing</span>`}</td>
-                <td>${escapeHtml(p.h1_tag) || `<span class="text-muted">None</span>`}</td>
                 <td><div class="issues-pill-container">${issuesHtml}</div></td>
-                <td>${escapeHtml(p.redirect_url) || "--"}</td>
+                <td>${renderBlockedAIBots(p)}</td>
+                <td>${depth}</td>
+                <td><button class="btn btn-xs btn-primary" onclick="event.stopPropagation(); triggerReaudit(${p.id})">Reaudit</button></td>
             </tr>
             <tr class="details-row hidden" id="details-${p.id}">
                 <td colspan="7">

@@ -23,3 +23,10 @@ Simple & Documented Code: Do not over engineer anything. Build only what is requ
 Before executing code, ensure you align with the existing project definitions:
 phase_1_prd.md: Outlines the 3 core modules (Site Audit, Content Engine, Rank Tracker) and the VNC CAPTCHA flow.
 seo_platform_schema_v1.sql: The baseline SQLite schema containing users, user_settings, audit_runs, audit_pages, tracked_keywords, and keyword_rank_history.
+
+5. Core Development Principles (Skills)
+- Think Before Coding: Don't assume. Don't hide confusion. Surface tradeoffs. State assumptions explicitly. Push back or ask if unsure.
+- Simplicity First: Write minimum code to solve the problem. Avoid overcomplication.
+- Surgical Changes: Touch only what you must. Match existing style and clean up only your own changes.
+- Goal-Driven Execution: Define success criteria, write tests/verifications, and loop until verified.
+

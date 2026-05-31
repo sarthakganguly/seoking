@@ -175,7 +175,7 @@ def api_get_settings(user_id: int = Depends(get_current_user)):
         
         # Inject defaults if missing
         defaults = {
-            "theme": "dark",
+            "theme": "light",
             "max_concurrent_crawler_tabs": "3",
             "max_concurrent_browser_tabs": "3",
             "jitter_min_ms": "3000",
@@ -389,12 +389,257 @@ def api_cancel_audit(run_id: int, user_id: int = Depends(get_current_user)):
         return {"message": "Cancellation request registered."}
     raise HTTPException(status_code=400, detail="Audit is not actively running.")
 
+@app.get("/api/audit/compare")
+def api_compare_audit_runs(
+    run_id_1: int,
+    run_id_2: int,
+    user_id: int = Depends(get_current_user)
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM audit_runs WHERE id = ? AND user_id = ?", (run_id_1, user_id))
+        run1 = cursor.fetchone()
+        cursor.execute("SELECT * FROM audit_runs WHERE id = ? AND user_id = ?", (run_id_2, user_id))
+        run2 = cursor.fetchone()
+        
+        if not run1 or not run2:
+            raise HTTPException(status_code=404, detail="One or both audit runs not found.")
+            
+        cursor.execute("SELECT is_broken, has_redirect, status_code, issues_json FROM audit_pages WHERE audit_run_id = ?", (run_id_1,))
+        pages1 = cursor.fetchall()
+        
+        cursor.execute("SELECT is_broken, has_redirect, status_code, issues_json FROM audit_pages WHERE audit_run_id = ?", (run_id_2,))
+        pages2 = cursor.fetchall()
+        
+        def calculate_stats(pages):
+            total = len(pages)
+            broken = sum(1 for p in pages if p["is_broken"])
+            redirects = sum(1 for p in pages if p["has_redirect"])
+            healthy = sum(1 for p in pages if p["status_code"] == 200 and not p["is_broken"])
+            
+            errors = 0
+            warnings = 0
+            notices = 0
+            
+            for p in pages:
+                try:
+                    issues = json.loads(p["issues_json"]) if p["issues_json"] else []
+                except Exception:
+                    issues = []
+                for issue in issues:
+                    issue_lower = issue.lower()
+                    if "broken" in issue_lower or "error" in issue_lower or "failure" in issue_lower:
+                        errors += 1
+                    elif "missing" in issue_lower or "too short" in issue_lower or "too long" in issue_lower or "thin" in issue_lower or "reliance" in issue_lower or "alt tags" in issue_lower:
+                        warnings += 1
+                    else:
+                        notices += 1
+            return {
+                "total": total,
+                "broken": broken,
+                "redirects": redirects,
+                "healthy": healthy,
+                "errors": errors,
+                "warnings": warnings,
+                "notices": notices,
+                "total_issues": errors + warnings + notices
+            }
+            
+        stats1 = calculate_stats(pages1)
+        stats2 = calculate_stats(pages2)
+        
+        # Calculate health score ratio (healthy / total) * 100
+        health1 = int((stats1["healthy"] / stats1["total"] * 100)) if stats1["total"] > 0 else 0
+        health2 = int((stats2["healthy"] / stats2["total"] * 100)) if stats2["total"] > 0 else 0
+        
+        stats1["health_score"] = health1
+        stats2["health_score"] = health2
+        
+        return {
+            "run1": {
+                "id": run_id_1,
+                "domain": run1["domain"],
+                "started_at": run1["started_at"],
+                "stats": stats1
+            },
+            "run2": {
+                "id": run_id_2,
+                "domain": run2["domain"],
+                "started_at": run2["started_at"],
+                "stats": stats2
+            }
+        }
+    finally:
+        conn.close()
+
+@app.post("/api/audit/page/{page_id}/reaudit")
+async def api_reaudit_page(page_id: int, user_id: int = Depends(get_current_user)):
+    import urllib.request
+    import urllib.parse
+    from bs4 import BeautifulSoup
+    from app.crawler import AuditCrawler, is_bot_blocked_robots_txt
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT p.*, r.user_id, r.domain, r.details_json as run_details_json 
+            FROM audit_pages p
+            JOIN audit_runs r ON p.audit_run_id = r.id
+            WHERE p.id = ? AND r.user_id = ?
+            """,
+            (page_id, user_id)
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Page not found.")
+            
+        url = row["url"]
+        run_id = row["audit_run_id"]
+        domain = row["domain"]
+        run_details_json = row["run_details_json"]
+        
+        # Initialize crawler instance
+        crawler = AuditCrawler(user_id, run_id, domain, 3)
+        
+        status_code = 0
+        title = None
+        meta_desc = None
+        h1 = None
+        is_broken = False
+        has_redirect = False
+        redirect_url = None
+        canonical_url = None
+        is_noindex = False
+        word_count = 0
+        issues = []
+        details = {}
+        
+        req = urllib.request.Request(
+            url, 
+            headers={'User-Agent': 'Mozilla/5.0 SEOKingBot/1.0'}
+        )
+        
+        import time
+        start_time = time.time()
+        try:
+            response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)
+            load_time = time.time() - start_time
+            status_code = response.status
+            
+            final_url = response.geturl()
+            if final_url != url:
+                has_redirect = True
+                redirect_url = final_url
+            
+            content_type = response.headers.get('Content-Type', '')
+            if 'text/html' in content_type:
+                html_content = response.read()
+                parsed = crawler.analyze_page_seo(url, status_code, dict(response.headers), html_content)
+                title = parsed.get("title")
+                meta_desc = parsed.get("meta_desc")
+                h1 = parsed.get("h1")
+                is_broken = parsed.get("is_broken", False)
+                canonical_url = parsed.get("canonical")
+                is_noindex = parsed.get("is_noindex", False)
+                word_count = parsed.get("word_count", 0)
+                issues = parsed.get("issues", [])
+                details = parsed.get("details", {})
+                
+                soup = BeautifulSoup(html_content, 'html.parser')
+                
+                outgoing = []
+                for a in soup.find_all('a', href=True):
+                    href = a.get('href', '').strip()
+                    if href and not href.startswith(('#', 'javascript:', 'mailto:', 'tel:')):
+                        abs_href = urllib.parse.urljoin(url, href)
+                        outgoing.append(abs_href)
+                details["outgoing_links"] = list(set(outgoing))
+                
+                scripts = [s.get('src') for s in soup.find_all('script') if s.get('src')]
+                css = [l.get('href') for l in soup.find_all('link', rel='stylesheet') if l.get('href')]
+                details["js_count"] = len(scripts)
+                details["css_count"] = len(css)
+            else:
+                details["depth"] = row["depth"] if "depth" in row else 0
+                details["load_time"] = round(load_time, 3)
+                details["outgoing_links"] = []
+        except Exception as e:
+            load_time = time.time() - start_time
+            status_code = 0
+            is_broken = True
+            issues = ["Crawl Execution Failure"]
+            details["depth"] = 0
+            details["load_time"] = round(load_time, 3)
+            details["outgoing_links"] = []
+            
+        run_details = {}
+        if run_details_json:
+            try:
+                run_details = json.loads(run_details_json)
+            except Exception:
+                pass
+        robots_content = run_details.get("robots_txt_content", "")
+        ai_bots = ["ChatGPT-User", "OAI-SearchBot", "Googlebot", "Google-Extended"]
+        parsed_url = urllib.parse.urlparse(url)
+        url_path = parsed_url.path or "/"
+        blocked_bots = []
+        for bot in ai_bots:
+            if is_bot_blocked_robots_txt(robots_content, url_path, bot):
+                blocked_bots.append(bot)
+        details["blocked_ai_bots"] = blocked_bots
+        
+        existing_details = {}
+        if row["details_json"]:
+            try:
+                existing_details = json.loads(row["details_json"])
+            except Exception:
+                pass
+        details["ilr"] = existing_details.get("ilr", 10)
+        details["incoming_links"] = existing_details.get("incoming_links", [])
+        details["incoming_links_count"] = existing_details.get("incoming_links_count", 0)
+        
+        if blocked_bots and "Blocked from crawling by AI agents" not in issues:
+            issues.append("Blocked from crawling by AI agents")
+            
+        cursor.execute(
+            """
+            UPDATE audit_pages 
+            SET status_code = ?, title_tag = ?, meta_description = ?, h1_tag = ?,
+                is_broken = ?, has_redirect = ?, redirect_url = ?, canonical_url = ?,
+                is_noindex = ?, word_count = ?, issues_json = ?, details_json = ?
+            WHERE id = ?
+            """,
+            (
+                status_code, title, meta_desc, h1,
+                1 if is_broken else 0, 1 if has_redirect else 0, redirect_url, canonical_url,
+                1 if is_noindex else 0, word_count, json.dumps(issues), json.dumps(details),
+                page_id
+            )
+        )
+        conn.commit()
+        return {"message": "Page reaudited successfully"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
 @app.delete("/api/audit/run/{run_id}")
 def api_delete_audit(run_id: int, user_id: int = Depends(get_current_user)):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("DELETE FROM audit_runs WHERE id = ? AND user_id = ?", (run_id, user_id))
+        
+        # Reset AUTOINCREMENT sequence to current max ID
+        cursor.execute("SELECT MAX(id) FROM audit_runs")
+        max_id_row = cursor.fetchone()
+        max_id = max_id_row[0] if max_id_row and max_id_row[0] is not None else 0
+        cursor.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'audit_runs'", (max_id,))
+        
         conn.commit()
         return {"message": "Audit run deleted successfully."}
     except Exception as e:
@@ -477,6 +722,13 @@ def api_delete_performance_run(run_id: int, user_id: int = Depends(get_current_u
     cursor = conn.cursor()
     try:
         cursor.execute("DELETE FROM performance_audits WHERE id = ? AND user_id = ?", (run_id, user_id))
+        
+        # Reset AUTOINCREMENT sequence to current max ID
+        cursor.execute("SELECT MAX(id) FROM performance_audits")
+        max_id_row = cursor.fetchone()
+        max_id = max_id_row[0] if max_id_row and max_id_row[0] is not None else 0
+        cursor.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'performance_audits'", (max_id,))
+        
         conn.commit()
         return {"message": "Performance run deleted successfully."}
     except Exception as e:
