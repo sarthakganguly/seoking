@@ -624,6 +624,7 @@ async function loadAuditDetails(runId, page = 1) {
         
         // Save current run details
         currentRunDetails = data.run.details || {};
+        normalizePagesIssues(data.pages);
         selectedAuditPages = data.pages;
         
         renderAuditPageMetrics(data.metrics);
@@ -734,6 +735,7 @@ async function loadAuditDetails(runId, page = 1) {
         const allPagesRes = await fetch(`/api/audit/run/${runId}/pages/all`);
         const allPagesData = await allPagesRes.json();
         
+        normalizePagesIssues(allPagesData.pages);
         processAllPagesData(allPagesData.pages, data.run);
         
         // Initialize chips inside issues tab panel
@@ -767,6 +769,21 @@ async function loadAuditDetails(runId, page = 1) {
     } catch (e) {
         console.error("[SEO King] Failed to load audit details:", e);
     }
+}
+
+function normalizePagesIssues(pages) {
+    if (!pages) return;
+    pages.forEach(p => {
+        if (p.issues) {
+            p.issues = p.issues.map(iss => {
+                if (iss.toLowerCase().includes("missing alt tags")) {
+                    return "Missing Alt Tags";
+                }
+                return iss;
+            });
+            p.issues = [...new Set(p.issues)];
+        }
+    });
 }
 
 function processAllPagesData(pages, run) {
@@ -1479,15 +1496,132 @@ function showSingleIssueDetails(sev, issueName) {
     const fixEl = document.getElementById("single-issue-how-to-fix");
     if (fixEl) fixEl.innerText = fixInfo;
     
-    const tbody = document.querySelector("#single-issue-pages-table tbody");
+    const table = document.getElementById("single-issue-pages-table");
+    if (!table) return;
+
+    let headerHtml = `
+        <tr>
+            <th>Page URL</th>
+            <th>Status Code</th>
+    `;
+    
+    let hasDetailsCol = true;
+    let detailsColName = "Issue Details";
+    
+    if (lower.includes("title tag too short") || lower.includes("title tag too long")) {
+        detailsColName = "Title Tag (Length)";
+    } else if (lower.includes("missing title tag")) {
+        detailsColName = "Title Tag Status";
+    } else if (lower.includes("meta description too short") || lower.includes("meta description too long")) {
+        detailsColName = "Meta Description (Length)";
+    } else if (lower.includes("missing meta description")) {
+        detailsColName = "Meta Description Status";
+    } else if (lower.includes("thin content")) {
+        detailsColName = "Word Count";
+    } else if (lower.includes("missing alt tags")) {
+        detailsColName = "Missing Alt Tags (Images)";
+    } else if (lower.includes("missing canonical tag")) {
+        detailsColName = "Canonical Tag Status";
+    } else if (lower.includes("canonical mismatch")) {
+        detailsColName = "Canonical URL vs Page URL";
+    } else if (lower.includes("missing h1 header")) {
+        detailsColName = "H1 Header Status";
+    } else if (lower.includes("multiple h1 headers")) {
+        detailsColName = "H1 Headers Found";
+    } else if (lower.includes("hierarchy jump")) {
+        detailsColName = "Header Jumps / Heading Hierarchy";
+    } else if (lower.includes("high js rendering reliance")) {
+        detailsColName = "JS Dependency";
+    } else if (lower.includes("malformed schema markup")) {
+        detailsColName = "Schema Status";
+    } else if (lower.includes("redundant taxonomy page")) {
+        detailsColName = "Redundant Page Details";
+    } else if (lower.includes("broken") || lower.includes("http error") || lower.includes("network") || lower.includes("failure")) {
+        detailsColName = "Error / Status Code";
+    }
+    
+    if (hasDetailsCol) {
+        headerHtml += `<th>${detailsColName}</th>`;
+    }
+    
+    headerHtml += `
+            <th>Actions</th>
+        </tr>
+    `;
+    const thead = table.querySelector("thead");
+    if (thead) thead.innerHTML = headerHtml;
+
+    const tbody = table.querySelector("tbody");
     if (tbody) {
-        tbody.innerHTML = issue.pages.map(p => `
-            <tr>
-                <td><strong class="word-break">${escapeHtml(p.url)}</strong></td>
-                <td><span class="badge ${p.status_code === 200 ? 'badge-success' : p.status_code >= 400 ? 'badge-danger' : 'badge-warning'}">${p.status_code || "ERR"}</span></td>
-                <td><button class="btn btn-xs btn-primary" onclick="event.stopPropagation(); triggerReaudit(${p.id})">Reaudit</button></td>
-            </tr>
-        `).join("");
+        tbody.innerHTML = issue.pages.map(p => {
+            let rowHtml = `
+                <tr>
+                    <td><strong class="word-break">${escapeHtml(p.url)}</strong></td>
+                    <td><span class="badge ${p.status_code === 200 ? 'badge-success' : p.status_code >= 400 ? 'badge-danger' : 'badge-warning'}">${p.status_code || "ERR"}</span></td>
+            `;
+            
+            if (hasDetailsCol) {
+                let cellValue = "";
+                if (lower.includes("title tag too short") || lower.includes("title tag too long")) {
+                    const titleText = p.title_tag || "None";
+                    const titleLen = p.title_tag ? p.title_tag.length : 0;
+                    cellValue = `<code>"${escapeHtml(titleText)}"</code> (${titleLen} chars)`;
+                } else if (lower.includes("missing title tag")) {
+                    cellValue = `<span class="badge badge-danger">Missing</span>`;
+                } else if (lower.includes("thin content")) {
+                    cellValue = `<strong>${p.word_count || 0}</strong> words`;
+                } else if (lower.includes("meta description too short") || lower.includes("meta description too long")) {
+                    const metaText = p.meta_description || "None";
+                    const metaLen = p.meta_description ? p.meta_description.length : 0;
+                    cellValue = `<code>"${escapeHtml(metaText)}"</code> (${metaLen} chars)`;
+                } else if (lower.includes("missing meta description")) {
+                    cellValue = `<span class="badge badge-danger">Missing</span>`;
+                } else if (lower.includes("missing alt tags")) {
+                    const imgs = p.details?.images || { total: 0, missing_alts_count: 0, missing_alts: [] };
+                    const listItems = (imgs.missing_alts || []).map(src => `<li style="margin-top:4px;" class="word-break"><code>${escapeHtml(src)}</code></li>`).join("");
+                    cellValue = `
+                        <strong>${imgs.missing_alts_count}</strong> images missing alt
+                        ${listItems ? `<ul class="bullet-list" style="margin-left: 15px; margin-top: 5px; font-size: 11px; list-style-type: disc;">${listItems}</ul>` : ""}
+                    `;
+                } else if (lower.includes("missing canonical tag")) {
+                    cellValue = `<span class="badge badge-danger">Missing</span>`;
+                } else if (lower.includes("canonical mismatch")) {
+                    cellValue = `Expected canonical: <code class="word-break">${escapeHtml(p.canonical_url || "None")}</code>`;
+                } else if (lower.includes("missing h1 header")) {
+                    cellValue = `<span class="badge badge-danger">Missing</span>`;
+                } else if (lower.includes("multiple h1 headers")) {
+                    const h1s = (p.details?.header_hierarchy || [])
+                        .filter(h => Array.isArray(h) && (h[0] === 'h1' || h[0]?.toLowerCase() === 'h1'))
+                        .map(h => `<li><code>"${escapeHtml(h[1])}"</code></li>`)
+                        .join("");
+                    cellValue = h1s 
+                        ? `<ul class="bullet-list" style="margin-left: 15px; font-size: 11px; list-style-type: disc;">${h1s}</ul>`
+                        : `<code>First: "${escapeHtml(p.h1_tag || "None")}"</code>`;
+                } else if (lower.includes("hierarchy jump")) {
+                    const violations = (p.issues || []).filter(iss => iss.toLowerCase().includes("hierarchy jump"));
+                    cellValue = violations.length > 0 
+                        ? `<ul class="bullet-list" style="margin-left: 15px; font-size: 11px; list-style-type: disc;">${violations.map(v => `<li><code>${escapeHtml(v)}</code></li>`).join("")}</ul>`
+                        : `<span class="badge badge-warning">Heading hierarchy jump detected</span>`;
+                } else if (lower.includes("high js rendering reliance")) {
+                    cellValue = `<span class="badge badge-warning">High JS reliance</span>`;
+                } else if (lower.includes("malformed schema markup")) {
+                    cellValue = `<span class="badge badge-danger">Malformed JSON-LD</span>`;
+                } else if (lower.includes("redundant taxonomy page")) {
+                    cellValue = `<span class="badge badge-warning">Category/Archive page</span>`;
+                } else if (lower.includes("broken") || lower.includes("http error") || lower.includes("network") || lower.includes("failure")) {
+                    cellValue = `<span class="badge badge-danger">${escapeHtml(p.status_code ? 'HTTP ' + p.status_code : 'Connection Failed')}</span>`;
+                } else {
+                    cellValue = `<span class="badge badge-info">Warning details</span>`;
+                }
+                rowHtml += `<td>${cellValue}</td>`;
+            }
+            
+            rowHtml += `
+                    <td><button class="btn btn-xs btn-primary" onclick="event.stopPropagation(); triggerReaudit(${p.id})">Reaudit</button></td>
+                </tr>
+            `;
+            return rowHtml;
+        }).join("");
     }
 }
 

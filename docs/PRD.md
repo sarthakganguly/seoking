@@ -87,6 +87,12 @@ Behaves as a local diagnostic scanner for a single, user-defined domain, expande
 16. **Anchor & Alt Text Audits:** Identifies images missing alt tags and links containing generic (e.g. "click here") or empty anchor text.
 
 * **UI Interface (Expanding Diagnostic Panels):** An expanding panel drawer under each page row allows deep inspection of the technical checklist, hierarchical header tree, structured data schemas, missing alt images, and generic anchor stats.
+* **Detailed Issues View:** The issues panel groups and normalizes crawler warnings and errors (e.g., consolidating alt tag warnings). When inspecting an issue, the UI renders a dynamic table detailing every affected URL with a context-specific column:
+  * *Title tag too short / too long:* Displays the current title tag string and character count.
+  * *Thin Content:* Displays the exact word count.
+  * *Meta description too short / too long:* Displays the current meta description and character count.
+  * *Missing Alt Tags:* Consolidates occurrences and displays a nested bulleted list of image URLs lacking alt attributes.
+  * *Other errors / warnings:* Displays relevant, contextual statuses (such as actual canonical tags, heading lists, JS dependency, or HTTP error codes).
 * **Local Storage:** Saves crawl results, issues arrays, and structural metadata to a local SQLite database for historical comparison and CSV extraction.
 
 ### **Module 2: Content Optimization Engine \[Direct Scrape\]**

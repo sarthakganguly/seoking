@@ -634,7 +634,7 @@ class AuditCrawler:
         if js_dependent:
             issues.append("High JS Rendering Reliance")
         if len(missing_alts) > 0:
-            issues.append(f"Missing Alt Tags ({len(missing_alts)} images)")
+            issues.append("Missing Alt Tags")
         if malformed_schema:
             issues.append("Malformed Schema Markup")
         if is_taxonomy and thin_content:
