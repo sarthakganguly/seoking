@@ -92,6 +92,7 @@ Behaves as a local diagnostic scanner for a single, user-defined domain, expande
   * *Thin Content:* Displays the exact word count.
   * *Meta description too short / too long:* Displays the current meta description and character count.
   * *Missing Alt Tags:* Consolidates occurrences and displays a nested bulleted list of image URLs lacking alt attributes.
+  * *Broken Link (404):* Displays a list of clickable, referring page URLs indicating where the broken link is located.
   * *Other errors / warnings:* Displays relevant, contextual statuses (such as actual canonical tags, heading lists, JS dependency, or HTTP error codes).
 * **Local Storage:** Saves crawl results, issues arrays, and structural metadata to a local SQLite database for historical comparison and CSV extraction.
 

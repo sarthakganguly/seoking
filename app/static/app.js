@@ -1536,7 +1536,9 @@ function showSingleIssueDetails(sev, issueName) {
         detailsColName = "Schema Status";
     } else if (lower.includes("redundant taxonomy page")) {
         detailsColName = "Redundant Page Details";
-    } else if (lower.includes("broken") || lower.includes("http error") || lower.includes("network") || lower.includes("failure")) {
+    } else if (lower.includes("broken")) {
+        detailsColName = "Referring Page(s)";
+    } else if (lower.includes("http error") || lower.includes("network") || lower.includes("failure")) {
         detailsColName = "Error / Status Code";
     }
     
@@ -1608,7 +1610,13 @@ function showSingleIssueDetails(sev, issueName) {
                     cellValue = `<span class="badge badge-danger">Malformed JSON-LD</span>`;
                 } else if (lower.includes("redundant taxonomy page")) {
                     cellValue = `<span class="badge badge-warning">Category/Archive page</span>`;
-                } else if (lower.includes("broken") || lower.includes("http error") || lower.includes("network") || lower.includes("failure")) {
+                } else if (lower.includes("broken")) {
+                    const refs = p.details?.incoming_links || [];
+                    const listItems = refs.map(ref => `<li style="margin-top:4px;" class="word-break"><a href="${escapeHtml(ref)}" target="_blank" class="link-primary" onclick="event.stopPropagation();">${escapeHtml(ref)}</a></li>`).join("");
+                    cellValue = listItems 
+                        ? `<ul class="bullet-list" style="margin-left: 15px; font-size: 11px; list-style-type: disc;">${listItems}</ul>`
+                        : `<span class="text-muted">None (Direct / Seed URL)</span>`;
+                } else if (lower.includes("http error") || lower.includes("network") || lower.includes("failure")) {
                     cellValue = `<span class="badge badge-danger">${escapeHtml(p.status_code ? 'HTTP ' + p.status_code : 'Connection Failed')}</span>`;
                 } else {
                     cellValue = `<span class="badge badge-info">Warning details</span>`;
