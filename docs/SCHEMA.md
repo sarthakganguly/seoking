@@ -95,7 +95,26 @@ CREATE TABLE keyword_rank_history (
 );
 
 -- ==========================================
--- 4. EPHEMERAL CONTENT OPTIMIZATION (Module 2)
+-- 4. PERFORMANCE AUDIT MODULE (Module 4)
+-- ==========================================
+CREATE TABLE performance_audits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    url TEXT NOT NULL,
+    strategy TEXT DEFAULT 'mobile', -- 'mobile', 'desktop'
+    status TEXT DEFAULT 'pending',   -- 'pending', 'running', 'completed', 'failed'
+    lcp REAL,                       -- Largest Contentful Paint (seconds)
+    inp REAL,                       -- Interaction to Next Paint (ms)
+    cls REAL,                       -- Cumulative Layout Shift
+    ttfb REAL,                      -- Time to First Byte (ms)
+    dom_size INTEGER,               -- Total DOM element count
+    details_json TEXT,              -- JSON containing CDN checks, caching info, and asset level breakdown
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ==========================================
+-- 5. EPHEMERAL CONTENT OPTIMIZATION (Module 2)
 -- ==========================================
 -- No persistent schema required based on architecture decisions.
 -- Data will exist only in memory / frontend state during the active session.
@@ -113,3 +132,6 @@ CREATE INDEX idx_audit_runs_domain_date ON audit_runs(domain, started_at DESC);
 
 -- Speeds up rendering the historical line charts in the UI
 CREATE INDEX idx_keyword_history_lookup ON keyword_rank_history(tracked_keyword_id, checked_at DESC);
+
+-- Speeds up fetching performance audit history for users
+CREATE INDEX idx_perf_audits_user_date ON performance_audits(user_id, created_at DESC);

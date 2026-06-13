@@ -21,14 +21,14 @@ Phase 1 focuses exclusively on establishing a resilient data-gathering pipeline 
 
 ### **Layout & Navigation**
 
-* **Sidebar Navigation:** The application will utilize a persistent left-hand sidebar containing navigation links to all core modules (Dashboard, Site Audit, Content Optimizer, Rank Tracker, Settings).  
+* **Sidebar Navigation:** The application will utilize a persistent left-hand sidebar containing navigation links to all core modules (Dashboard, Site Audit, Content Optimizer, Rank Tracker, Performance Audit, Settings).  
 * **Primary Workspace:** The right-hand pane will act as the dynamic workspace where all module interfaces, editors, and data tables are rendered.
 
 ### **Responsive & Modern Design**
 
 * **Viewport Support:** The UI must be fully responsive, seamlessly adapting to Mobile, Tablet, and Desktop viewports.  
 * **Theming:** The application will support both Light and Dark themes, adhering to modern web design standards (utilizing native CSS variables).  
-* **Data Portability:** Every data table across all modules (Audit, Rank Tracker, Entities) must feature a "Download CSV" button for local data extraction.
+* **Data Portability:** Every data table across all modules (Audit, Rank Tracker, Entities, Performance Audit) must feature a "Download CSV" button for local data extraction.
 
 ### **Authentication & User Management**
 
@@ -114,6 +114,15 @@ A tactical, low-volume position monitor replacing commercial rank trackers.
 * **Scheduled Scraping:** Executes automated Google searches for a predefined list of high-priority keywords (e.g., 20-50 queries daily).  
 * **Rank Extraction:** Parses the live SERP DOM to locate the user's specific domain URL and records the integer position (1 through 100).  
 * **Historical Dashboard:** Renders a simple line chart tracking position movements over time, stored locally.
+
+### **Module 4: Performance & Core Web Vitals Audit \[Local Execution\]**
+
+An on-demand performance auditing tool evaluating page speed optimization parameters.
+
+* **Performance Observers:** Launches Chromium in headful mode, injecting Javascript `PerformanceObservers` to gather Largest Contentful Paint (LCP), Layout Shift (CLS), and Interaction to Next Paint (INP) directly from the browser window object.
+* **Simulated Interaction:** Executes automated scrolling and body clicks to trigger browser event latency and record realistic user experience metrics.
+* **Asset Auditing:** Inspects document response headers to check for CDN use (Cloudflare, CloudFront, etc.) and cache-control properties. Parses image elements to analyze lazy loading, next-generation image formats, and explicit layout dimensions (width and height attributes).
+* **Local Persistence:** Stores performance metrics and detailed JSON logs in SQLite for user lookup and comparison.
 
 ## **5\. Out of Scope for Phase 1**
 
