@@ -96,6 +96,7 @@ def init_db():
         target_domain TEXT NOT NULL,
         target_geolocation TEXT DEFAULT 'en-US',
         target_locale TEXT DEFAULT 'en',
+        competitors_json TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
         UNIQUE(user_id, keyword, target_domain, target_geolocation)
@@ -106,6 +107,7 @@ def init_db():
         tracked_keyword_id INTEGER NOT NULL,
         rank_position INTEGER,
         ranking_url TEXT,
+        competitor_ranks_json TEXT,
         checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(tracked_keyword_id) REFERENCES tracked_keywords(id) ON DELETE CASCADE
     );
@@ -167,6 +169,20 @@ def init_db():
             cursor.execute("ALTER TABLE audit_pages ADD COLUMN details_json TEXT;")
             logger.info("Database migration: Added details_json to audit_pages table")
             
+        # Check tracked_keywords columns
+        cursor.execute("PRAGMA table_info(tracked_keywords)")
+        keywords_cols = [row["name"] for row in cursor.fetchall()]
+        if "competitors_json" not in keywords_cols:
+            cursor.execute("ALTER TABLE tracked_keywords ADD COLUMN competitors_json TEXT;")
+            logger.info("Database migration: Added competitors_json to tracked_keywords table")
+
+        # Check keyword_rank_history columns
+        cursor.execute("PRAGMA table_info(keyword_rank_history)")
+        history_cols = [row["name"] for row in cursor.fetchall()]
+        if "competitor_ranks_json" not in history_cols:
+            cursor.execute("ALTER TABLE keyword_rank_history ADD COLUMN competitor_ranks_json TEXT;")
+            logger.info("Database migration: Added competitor_ranks_json to keyword_rank_history table")
+
         conn.commit()
         logger.info("Database initialized successfully with tables, indexes, and migrations.")
     except Exception as e:

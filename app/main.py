@@ -89,6 +89,7 @@ class KeywordAddReq(BaseModel):
     target_domain: str
     target_geolocation: str = "en-US"
     target_locale: str = "en"
+    competitors: list[str] = []
 
 class OptimizeReq(BaseModel):
     keyword: str
@@ -741,15 +742,25 @@ def api_delete_performance_run(run_id: int, user_id: int = Depends(get_current_u
 
 @app.post("/api/keywords")
 def api_add_keyword(data: KeywordAddReq, user_id: int = Depends(get_current_user)):
+    if len(data.competitors) > 3:
+        raise HTTPException(status_code=400, detail="Maximum of 3 competitor domains can be tracked.")
+    
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute(
             """
-            INSERT INTO tracked_keywords (user_id, keyword, target_domain, target_geolocation, target_locale)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO tracked_keywords (user_id, keyword, target_domain, target_geolocation, target_locale, competitors_json)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (user_id, data.keyword, data.target_domain, data.target_geolocation, data.target_locale)
+            (
+                user_id,
+                data.keyword,
+                data.target_domain,
+                data.target_geolocation,
+                data.target_locale,
+                json.dumps(data.competitors)
+            )
         )
         conn.commit()
         return {"message": "Keyword added successfully."}
@@ -767,11 +778,11 @@ def api_get_keywords(user_id: int = Depends(get_current_user)):
         # Get keywords along with their most recent rank
         cursor.execute(
             """
-            SELECT tk.id, tk.keyword, tk.target_domain, tk.target_geolocation, tk.target_locale, tk.created_at,
-                   kh.rank_position, kh.ranking_url, kh.checked_at
+            SELECT tk.id, tk.keyword, tk.target_domain, tk.target_geolocation, tk.target_locale, tk.competitors_json, tk.created_at,
+                   kh.rank_position, kh.ranking_url, kh.competitor_ranks_json, kh.checked_at
             FROM tracked_keywords tk
             LEFT JOIN (
-                SELECT tracked_keyword_id, rank_position, ranking_url, checked_at
+                SELECT tracked_keyword_id, rank_position, ranking_url, competitor_ranks_json, checked_at
                 FROM keyword_rank_history
                 WHERE id IN (
                     SELECT MAX(id) FROM keyword_rank_history GROUP BY tracked_keyword_id
@@ -783,7 +794,27 @@ def api_get_keywords(user_id: int = Depends(get_current_user)):
             (user_id,)
         )
         rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        
+        res = []
+        for row in rows:
+            d = dict(row)
+            if d.get("competitors_json"):
+                try:
+                    d["competitors"] = json.loads(d["competitors_json"])
+                except Exception:
+                    d["competitors"] = []
+            else:
+                d["competitors"] = []
+                
+            if d.get("competitor_ranks_json"):
+                try:
+                    d["competitor_ranks"] = json.loads(d["competitor_ranks_json"])
+                except Exception:
+                    d["competitor_ranks"] = {}
+            else:
+                d["competitor_ranks"] = {}
+            res.append(d)
+        return res
     finally:
         conn.close()
 
@@ -798,11 +829,23 @@ def api_get_keyword_history(kw_id: int, user_id: int = Depends(get_current_user)
             raise HTTPException(status_code=404, detail="Tracked keyword not found.")
             
         cursor.execute(
-            "SELECT rank_position, ranking_url, checked_at FROM keyword_rank_history WHERE tracked_keyword_id = ? ORDER BY checked_at ASC",
+            "SELECT rank_position, ranking_url, competitor_ranks_json, checked_at FROM keyword_rank_history WHERE tracked_keyword_id = ? ORDER BY checked_at ASC",
             (kw_id,)
         )
         rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        
+        res = []
+        for row in rows:
+            d = dict(row)
+            if d.get("competitor_ranks_json"):
+                try:
+                    d["competitor_ranks"] = json.loads(d["competitor_ranks_json"])
+                except Exception:
+                    d["competitor_ranks"] = {}
+            else:
+                d["competitor_ranks"] = {}
+            res.append(d)
+        return res
     finally:
         conn.close()
 

@@ -2447,6 +2447,7 @@ function closeOptimizerWorkspace() {
 // ----------------- MODULE 3: KEYWORD RANK MONITOR -----------------
 
 function openNewKeywordModal() {
+    document.getElementById("keyword-add-form").reset();
     document.getElementById("modal-keyword").classList.remove("hidden");
 }
 
@@ -2457,13 +2458,25 @@ async function handleAddKeyword(e) {
     const geo = document.getElementById("track-geo").value;
     const lang = document.getElementById("track-lang").value;
     
+    const competitors = [
+        document.getElementById("track-competitor1").value.trim(),
+        document.getElementById("track-competitor2").value.trim(),
+        document.getElementById("track-competitor3").value.trim()
+    ].filter(c => c !== "");
+    
     closeModal("modal-keyword");
     
     try {
         const response = await fetch("/api/keywords", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ keyword, target_domain: domain, target_geolocation: geo, target_locale: lang })
+            body: JSON.stringify({ 
+                keyword, 
+                target_domain: domain, 
+                target_geolocation: geo, 
+                target_locale: lang,
+                competitors: competitors
+            })
         });
         
         if (response.ok) {
@@ -2483,17 +2496,36 @@ async function loadTrackedKeywords() {
         trackedKeywords = await response.json();
         
         const tbody = document.querySelector("#tracker-keywords-table tbody");
+        const triggerBtn = document.getElementById("trigger-ranks-btn");
         if (trackedKeywords.length === 0) {
             tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No tracked keywords. Add one to start monitoring rankings.</td></tr>`;
+            if (triggerBtn) triggerBtn.disabled = true;
             return;
         }
+        
+        if (triggerBtn) triggerBtn.disabled = false;
         
         tbody.innerHTML = trackedKeywords.map(k => `
             <tr>
                 <td><strong>${k.keyword}</strong></td>
-                <td>${k.target_domain}</td>
+                <td>
+                    <strong>${k.target_domain}</strong>
+                    ${k.competitors && k.competitors.length > 0 ? `<div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">vs: ${k.competitors.join(", ")}</div>` : ""}
+                </td>
                 <td><span class="badge badge-secondary">${k.target_geolocation}</span></td>
-                <td>${k.rank_position !== null ? `<span class="badge badge-success">#${k.rank_position}</span>` : `<span class="badge badge-danger">Not in Top 100</span>`}</td>
+                <td>
+                    ${k.rank_position !== null ? `<span class="badge badge-success">#${k.rank_position}</span>` : `<span class="badge badge-danger">Not in Top 100</span>`}
+                    ${k.competitor_ranks && Object.keys(k.competitor_ranks).length > 0 ? `
+                        <div style="font-size: 11px; margin-top: 4px; display: flex; flex-direction: column; gap: 2px;">
+                            ${Object.entries(k.competitor_ranks).map(([comp, data]) => `
+                                <span class="text-muted" style="display: flex; justify-content: space-between; gap: 8px;">
+                                    <span style="max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;">${comp}:</span>
+                                    <strong>${data.rank !== null && data.rank !== undefined ? `#${data.rank}` : "--"}</strong>
+                                </span>
+                            `).join("")}
+                        </div>
+                    ` : ""}
+                </td>
                 <td class="word-break">${k.ranking_url ? `<a href="${k.ranking_url}" target="_blank" rel="noopener">${k.ranking_url}</a>` : "--"}</td>
                 <td>${k.checked_at ? formatDate(k.checked_at) : "Never"}</td>
                 <td>
@@ -2574,14 +2606,14 @@ function renderHistoricalChart(history) {
 
     const width = 800;
     const height = 300;
-    const padding = { top: 30, right: 30, bottom: 40, left: 50 };
+    const padding = { top: 30, right: 35, bottom: 40, left: 50 };
     
     // Add linear gradient for chart line
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
     defs.innerHTML = `
         <linearGradient id="chart-grad" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stop-color="#10b981" />
-            <stop offset="100%" stop-color="#d97706" />
+            <stop offset="100%" stop-color="#10b981" />
         </linearGradient>
     `;
     svg.appendChild(defs);
@@ -2595,9 +2627,7 @@ function renderHistoricalChart(history) {
     const count = history.length;
     const xStep = (width - padding.left - padding.right) / (count > 1 ? count - 1 : 1);
     
-    let points = [];
-    
-    // 1. Draw horizontal grid lines (Rank 1, Rank 10, Rank 25, Rank 50, Rank 75, Rank 100)
+    // Draw horizontal grid lines (Rank 1, Rank 10, Rank 25, Rank 50, Rank 75, Rank 100)
     const gridYVals = [1, 10, 25, 50, 75, 100];
     gridYVals.forEach(yVal => {
         const yPct = (yVal - minRank) / (maxRank - minRank);
@@ -2622,17 +2652,9 @@ function renderHistoricalChart(history) {
         svg.appendChild(label);
     });
 
-    // 2. Draw dates / plot points
+    // Draw dates along X-axis
     history.forEach((point, index) => {
-        const rank = point.rank_position !== null ? point.rank_position : 100;
-        
         const xCoord = padding.left + index * xStep;
-        const yPct = (rank - minRank) / (maxRank - minRank);
-        const yCoord = padding.top + yPct * (height - padding.top - padding.bottom);
-        
-        points.push(`${xCoord},${yCoord}`);
-        
-        // Horizontal Date text labeling (Skip to avoid overlaps if count > 10)
         if (count < 10 || index % Math.ceil(count / 10) === 0 || index === count - 1) {
             const dtText = point.checked_at.split(" ")[0].slice(5); // MM-DD format
             const dateLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -2643,30 +2665,137 @@ function renderHistoricalChart(history) {
             dateLabel.textContent = dtText;
             svg.appendChild(dateLabel);
         }
+    });
+
+    // Detect all competitors present in history
+    const competitorsSet = new Set();
+    history.forEach(point => {
+        if (point.competitor_ranks) {
+            Object.keys(point.competitor_ranks).forEach(comp => {
+                competitorsSet.add(comp);
+            });
+        }
+    });
+    const competitorsList = Array.from(competitorsSet);
+    const compColors = ["#8b5cf6", "#3b82f6", "#f97316"]; // Colors for up to 3 competitors
+
+    // 1. Draw Target Domain rank path
+    let targetPoints = [];
+    history.forEach((point, index) => {
+        const rank = point.rank_position !== null ? point.rank_position : 100;
+        const xCoord = padding.left + index * xStep;
+        const yPct = (rank - minRank) / (maxRank - minRank);
+        const yCoord = padding.top + yPct * (height - padding.top - padding.bottom);
+        targetPoints.push(`${xCoord},${yCoord}`);
         
-        // Interactive Circles
+        // Interactive Circle for Target Domain
         const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         dot.setAttribute("cx", xCoord);
         dot.setAttribute("cy", yCoord);
         dot.setAttribute("r", "5");
         dot.setAttribute("class", "chart-dot");
         
-        // Tooltip description
-        const tooltipText = `Rank: ${point.rank_position !== null ? `#${point.rank_position}` : 'N/A'} checked ${point.checked_at.split(" ")[0]}`;
+        const tooltipText = `Target: ${point.rank_position !== null ? `#${point.rank_position}` : 'N/A'} checked ${point.checked_at.split(" ")[0]}`;
         const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
         title.textContent = tooltipText;
         dot.appendChild(title);
-        
         svg.appendChild(dot);
     });
 
-    // 3. Draw chart lines joining coordinate points
     if (count > 1) {
         const polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-        polyline.setAttribute("points", points.join(" "));
+        polyline.setAttribute("points", targetPoints.join(" "));
         polyline.setAttribute("class", "chart-line");
-        svg.insertBefore(polyline, svg.firstChild.nextSibling); // insert below dots
+        svg.insertBefore(polyline, svg.firstChild.nextSibling);
     }
+
+    // 2. Draw Competitors paths
+    competitorsList.forEach((comp, compIdx) => {
+        const compColor = compColors[compIdx % compColors.length];
+        let compPoints = [];
+        
+        history.forEach((point, index) => {
+            const compData = point.competitor_ranks && point.competitor_ranks[comp];
+            const rank = (compData && compData.rank !== null && compData.rank !== undefined) ? compData.rank : 100;
+            
+            const xCoord = padding.left + index * xStep;
+            const yPct = (rank - minRank) / (maxRank - minRank);
+            const yCoord = padding.top + yPct * (height - padding.top - padding.bottom);
+            compPoints.push(`${xCoord},${yCoord}`);
+            
+            // Dot for competitor
+            const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            dot.setAttribute("cx", xCoord);
+            dot.setAttribute("cy", yCoord);
+            dot.setAttribute("r", "4");
+            dot.setAttribute("fill", compColor);
+            dot.setAttribute("stroke", "var(--bg-card)");
+            dot.setAttribute("stroke-width", "1");
+            
+            const tooltipText = `${comp}: ${compData && compData.rank !== null && compData.rank !== undefined ? `#${compData.rank}` : 'N/A'} checked ${point.checked_at.split(" ")[0]}`;
+            const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+            title.textContent = tooltipText;
+            dot.appendChild(title);
+            svg.appendChild(dot);
+        });
+
+        if (count > 1) {
+            const polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+            polyline.setAttribute("points", compPoints.join(" "));
+            polyline.setAttribute("stroke", compColor);
+            polyline.setAttribute("stroke-width", "2");
+            polyline.setAttribute("stroke-dasharray", "4,4"); // Dashed for competitor lines
+            polyline.setAttribute("fill", "none");
+            svg.insertBefore(polyline, svg.firstChild.nextSibling);
+        }
+    });
+
+    // 3. Draw Legend at Top-Right
+    const legend = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    legend.setAttribute("transform", `translate(${width - padding.right - 180}, ${padding.top - 15})`);
+    
+    let offset = 0;
+    
+    // Main domain legend item
+    const targetItem = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    targetItem.setAttribute("transform", `translate(0, ${offset})`);
+    
+    const targetLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    targetLine.setAttribute("x1", 0); targetLine.setAttribute("y1", 0); targetLine.setAttribute("x2", 15); targetLine.setAttribute("y2", 0);
+    targetLine.setAttribute("stroke", "#10b981"); targetLine.setAttribute("stroke-width", "3");
+    targetItem.appendChild(targetLine);
+    
+    const targetText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    targetText.setAttribute("x", 20); targetText.setAttribute("y", 4); targetText.setAttribute("class", "chart-text");
+    targetText.setAttribute("font-size", "11");
+    targetText.textContent = "Target Domain";
+    targetItem.appendChild(targetText);
+    legend.appendChild(targetItem);
+    offset += 16;
+
+    // Competitor legend items
+    competitorsList.forEach((comp, compIdx) => {
+        const compColor = compColors[compIdx % compColors.length];
+        
+        const compItem = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        compItem.setAttribute("transform", `translate(0, ${offset})`);
+        
+        const compLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        compLine.setAttribute("x1", 0); compLine.setAttribute("y1", 0); compLine.setAttribute("x2", 15); compLine.setAttribute("y2", 0);
+        compLine.setAttribute("stroke", compColor); compLine.setAttribute("stroke-width", "2"); compLine.setAttribute("stroke-dasharray", "3,3");
+        compItem.appendChild(compLine);
+        
+        const compText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        compText.setAttribute("x", 20); compText.setAttribute("y", 4); compText.setAttribute("class", "chart-text");
+        compText.setAttribute("font-size", "11");
+        compText.textContent = comp.length > 20 ? comp.slice(0, 17) + "..." : comp;
+        compItem.appendChild(compText);
+        
+        legend.appendChild(compItem);
+        offset += 16;
+    });
+
+    svg.appendChild(legend);
 }
 
 // ----------------- CLIENT-SIDE CSV EXPORT SYSTEM -----------------

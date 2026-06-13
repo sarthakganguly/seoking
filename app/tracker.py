@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import urllib.parse
+import json
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from app.database import get_db_connection, get_user_setting
@@ -11,16 +12,29 @@ logger = logging.getLogger("seoking.tracker")
 # Global dict to check if keyword rank tracking job is actively running
 TRACKING_JOBS = {"active": False}
 
-def extract_rank_position(serp_html: str, target_domain: str) -> tuple[int | None, str | None]:
+def extract_ranks(serp_html: str, target_domain: str, competitors: list[str]) -> dict:
     """
-    Parses the SERP HTML page to find the organic rank of the target domain.
-    Returns: (rank_position, ranking_url)
+    Parses the SERP HTML page to find the organic rank of the target domain
+    and a list of competitor domains.
+    Returns: {
+        "target": {"rank": int | None, "url": str | None},
+        "competitors": {
+            "competitor1.com": {"rank": int | None, "url": str | None},
+            ...
+        }
+    }
     """
     soup = BeautifulSoup(serp_html, "html.parser")
     rank = 1
     
-    # Standardize target domain for matching (e.g., match example.com, www.example.com)
+    # Standardize target and competitors for matching
     target_clean = target_domain.lower().replace("www.", "")
+    comp_clean_map = {c: c.lower().replace("www.", "") for c in competitors}
+    
+    result = {
+        "target": {"rank": None, "url": None},
+        "competitors": {c: {"rank": None, "url": None} for c in competitors}
+    }
     
     for a in soup.find_all("a", href=True):
         href = a["href"]
@@ -29,16 +43,32 @@ def extract_rank_position(serp_html: str, target_domain: str) -> tuple[int | Non
             parsed_href = urllib.parse.urlparse(href)
             netloc = parsed_href.netloc.lower()
             
-            if target_clean in netloc:
+            # Check target domain
+            if result["target"]["rank"] is None and target_clean in netloc:
                 logger.info(f"Target domain '{target_domain}' found at rank {rank}: {href}")
-                return rank, href
+                result["target"] = {"rank": rank, "url": href}
+            
+            # Check competitors
+            for c, c_clean in comp_clean_map.items():
+                if result["competitors"][c]["rank"] is None and c_clean in netloc:
+                    logger.info(f"Competitor domain '{c}' found at rank {rank}: {href}")
+                    result["competitors"][c] = {"rank": rank, "url": href}
             
             rank += 1
             if rank > 100:
                 break
                 
-    logger.info(f"Target domain '{target_domain}' not found in top 100 results.")
-    return None, None
+    if result["target"]["rank"] is None:
+        logger.info(f"Target domain '{target_domain}' not found in top 100 results.")
+    return result
+
+def extract_rank_position(serp_html: str, target_domain: str) -> tuple[int | None, str | None]:
+    """
+    Parses the SERP HTML page to find the organic rank of the target domain.
+    Returns: (rank_position, ranking_url)
+    """
+    res = extract_ranks(serp_html, target_domain, [])
+    return res["target"]["rank"], res["target"]["url"]
 
 async def check_keyword_rank(user_id: int, kw_id: int, keyword: str, target_domain: str) -> bool:
     """
@@ -49,22 +79,44 @@ async def check_keyword_rank(user_id: int, kw_id: int, keyword: str, target_doma
         # Step 1: Scrape Google SERP
         serp_html = await scrape_google_serp(user_id, keyword)
         
-        # Step 2: Extract rank position
-        rank_pos, ranking_url = extract_rank_position(serp_html, target_domain)
+        # Step 2: Retrieve competitors
+        competitors = []
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT competitors_json FROM tracked_keywords WHERE id = ?", (kw_id,))
+            row = cursor.fetchone()
+            if row and row["competitors_json"]:
+                try:
+                    competitors = json.loads(row["competitors_json"])
+                    if not isinstance(competitors, list):
+                        competitors = []
+                except Exception:
+                    competitors = []
+        except Exception as e:
+            logger.error(f"Error reading competitors for keyword {kw_id}: {e}")
+        finally:
+            conn.close()
+
+        # Step 3: Extract ranks
+        res = extract_ranks(serp_html, target_domain, competitors)
+        rank_pos = res["target"]["rank"]
+        ranking_url = res["target"]["url"]
+        competitor_ranks = res["competitors"]
         
-        # Step 3: Write history to DB
+        # Step 4: Write history to DB
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
             cursor.execute(
                 """
-                INSERT INTO keyword_rank_history (tracked_keyword_id, rank_position, ranking_url)
-                VALUES (?, ?, ?)
+                INSERT INTO keyword_rank_history (tracked_keyword_id, rank_position, ranking_url, competitor_ranks_json)
+                VALUES (?, ?, ?, ?)
                 """,
-                (kw_id, rank_pos, ranking_url)
+                (kw_id, rank_pos, ranking_url, json.dumps(competitor_ranks))
             )
             conn.commit()
-            logger.info(f"Saved rank history: Keyword='{keyword}', Rank={rank_pos}")
+            logger.info(f"Saved rank history: Keyword='{keyword}', Rank={rank_pos}, CompetitorRanks={competitor_ranks}")
             return True
         except Exception as e:
             logger.error(f"Error saving rank history for {keyword}: {e}")
