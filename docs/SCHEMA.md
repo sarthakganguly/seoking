@@ -79,6 +79,7 @@ CREATE TABLE tracked_keywords (
     -- Allows tracking the same keyword in different locations/languages
     target_geolocation TEXT DEFAULT 'en-US', 
     target_locale TEXT DEFAULT 'en',
+    competitors_json TEXT, -- JSON list of competitor domains (max 3)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE(user_id, keyword, target_domain, target_geolocation)
@@ -90,6 +91,7 @@ CREATE TABLE keyword_rank_history (
     tracked_keyword_id INTEGER NOT NULL,
     rank_position INTEGER, -- Will be NULL if the URL is not found in the Top 100
     ranking_url TEXT,      -- The specific URL from the target_domain that ranked
+    competitor_ranks_json TEXT, -- JSON dictionary of ranks for competitors
     checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(tracked_keyword_id) REFERENCES tracked_keywords(id) ON DELETE CASCADE
 );
