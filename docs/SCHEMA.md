@@ -1,5 +1,6 @@
 -- Database Schema v1 for Local SEO Platform (SQLite)
 -- Optimized for SQLite on resource-constrained hardware
+-- Aligned with Google Search Central Risk Auditor & Platform
 
 PRAGMA foreign_keys = ON; -- Enforce foreign key constraints
 
@@ -27,7 +28,7 @@ CREATE TABLE user_settings (
 );
 
 -- ==========================================
--- 2. SITE AUDIT MODULE (Module 1)
+-- 2. SITE CRAWLER & AUDIT DATA (Chapters 1 - 6)
 -- ==========================================
 
 -- Represents a single audit run for a domain.
@@ -37,15 +38,17 @@ CREATE TABLE audit_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     domain TEXT NOT NULL,
-    status TEXT DEFAULT 'pending', -- 'pending', 'running', 'completed', 'failed'
+    status TEXT DEFAULT 'pending', -- 'pending', 'running', 'completed', 'failed', 'cancelled'
     total_urls_crawled INTEGER DEFAULT 0,
     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
-    details_json TEXT, -- JSON-serialized dict containing robots.txt info, sitemaps list, and orphan pages list
+    details_json TEXT, -- JSON-serialized dict containing robots.txt info, sitemaps list, SSL details, and orphan pages list
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- Stores the individual page results for a specific audit run.
+-- Holds audit page diagnostics for Chapter 1 (Fundamentals), Chapter 2 (Crawling & Indexing), 
+-- Chapter 3 (Crawling Infrastructure), Chapter 4 (Appearance), Chapter 5 (Monitor & Debug), and Chapter 6 (Specialty).
 CREATE TABLE audit_pages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     audit_run_id INTEGER NOT NULL,
@@ -61,13 +64,13 @@ CREATE TABLE audit_pages (
     is_noindex BOOLEAN DEFAULT 0, -- 1 if page has noindex meta or header
     word_count INTEGER, -- Word count of page text
     issues_json TEXT, -- JSON array of strings listing detected SEO issues on the page
-    details_json TEXT, -- JSON dictionary of full structural/diagnostic checks (header tree, alt images list, schema list)
+    details_json TEXT, -- JSON dictionary of full structural/diagnostic checks (header tree, alt images list, schema list, AMP status, mobile parity)
     crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(audit_run_id) REFERENCES audit_runs(id) ON DELETE CASCADE
 );
 
 -- ==========================================
--- 3. KEYWORD TRACKER MODULE (Module 3)
+-- 3. KEYWORD RANK HISTORY (Chapter 8)
 -- ==========================================
 
 -- The root configuration for keywords the user is tracking.
@@ -97,8 +100,9 @@ CREATE TABLE keyword_rank_history (
 );
 
 -- ==========================================
--- 4. PERFORMANCE AUDIT MODULE (Module 4)
+-- 4. PERFORMANCE AUDITS (Chapter 7)
 -- ==========================================
+
 CREATE TABLE performance_audits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -116,10 +120,16 @@ CREATE TABLE performance_audits (
 );
 
 -- ==========================================
--- 5. EPHEMERAL CONTENT OPTIMIZATION (Module 2)
+-- 5. EPHEMERAL CONTENT OPTIMIZATION (Chapter 1.2 / Ephemeral content engine)
 -- ==========================================
 -- No persistent schema required based on architecture decisions.
 -- Data will exist only in memory / frontend state during the active session.
+
+-- ==========================================
+-- 6. STANDALONE UTILITY TOOLS (Chapter 12)
+-- ==========================================
+-- No persistent schema required. Tools like Robots.txt Creator, Schema Generator,
+-- Sitemap Builder, etc., execute ephemerally and return results directly to the user.
 
 -- ==========================================
 -- INDEXES FOR PERFORMANCE

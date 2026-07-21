@@ -1,6 +1,6 @@
-# SEO King (Phase 1)
+# SEO King: Google Search Central Risk Auditor & Platform
 
-SEO King is a locally hosted, zero-dependency, local-first SEO tracking and content optimization platform. It operates entirely on your local machine via Docker, running automated searches and crawls directly from your local IP. It uses standard web scraping (via Playwright) combined with human-in-the-loop VNC CAPTCHA resolution to completely bypass the need for expensive third-party SaaS APIs.
+SEO King is a locally hosted, zero-dependency, local-first search engine optimization (SEO) tracking and content optimization platform. Operating entirely on your local machine via Docker, it runs automated searches, crawls, and performance audits directly from your local IP. It uses standard web scraping (via Playwright) combined with human-in-the-loop VNC CAPTCHA resolution to completely bypass the need for expensive third-party SaaS APIs.
 
 ---
 
@@ -8,8 +8,8 @@ SEO King is a locally hosted, zero-dependency, local-first SEO tracking and cont
 
 All design requirements, technical architecture definitions, and constraints are maintained under the [docs](file:///home/sarthakganguly/seoking/docs/) directory:
 
-- 📑 **[Product Requirements (PRD.md)](file:///home/sarthakganguly/seoking/docs/PRD.md)**: Details the functional goals of Phase 1, hardware constraints (ThinkPad X230 optimization), stealth scraping specifications, VNC CAPTCHA interception logic, and the core modules (Site Audit, Content Optimizer, Rank Tracker).
-- 🗄️ **[Database Schema (SCHEMA.md)](file:///home/sarthakganguly/seoking/docs/SCHEMA.md)**: Holds the SQLite schema definitions optimizing performance for users, settings, site audits, page crawls, keyword definitions, and rank historical tables.
+- 📑 **[Product Requirements (PRD.md)](file:///home/sarthakganguly/seoking/docs/PRD.md)**: Details the functional goals of the system, hardware constraints (ThinkPad X230 optimization), stealth scraping specifications, VNC CAPTCHA interception logic, the 8 Core Platform Chapters, and the Standalone Utility Tools Suite.
+- 🗄️ **[Database Schema (SCHEMA.md)](file:///home/sarthakganguly/seoking/docs/SCHEMA.md)**: Holds the SQLite schema definitions optimizing performance for users, settings, sitemaps, page crawls, keyword definitions, and rank historical tables.
 - 🤖 **[Agent Instructions (agents.md)](file:///home/sarthakganguly/seoking/docs/agents.md)**: Lists strict architectural boundaries, workflow instructions, scraping configurations, and development requirements for Antigravity coding assistants.
 
 ---
@@ -28,21 +28,23 @@ SEO King is 100% containerized. The system coordinates the following layers unde
 ```
 /home/sarthakganguly/seoking/
 ├── docs/                      # Requirement documentation
-│   ├── PRD.md
-│   ├── SCHEMA.md
-│   └── agents.md
+│   ├── PRD.md                 # Product Requirements (Google Search Central Risk Auditor)
+│   ├── SCHEMA.md              # Database Schema (SQLite)
+│   └── agents.md              # Agent instructions
 ├── app/                       # Source code directory
 │   ├── static/                # Single Page App frontend assets
 │   │   ├── index.html
 │   │   ├── style.css          # Custom Vanilla CSS styling
-│   │   └── app.js             # Client SPA routing & SVG chart draws
+│   │   ├── app.js             # Client SPA routing & SVG chart draws
+│   │   └── tools-hub.js       # Dynamic UI logic for Standalone Tools
 │   ├── auth.py                # Hashing and authentication
-│   ├── crawler.py             # Site auditor engine
+│   ├── crawler.py             # Site auditor engine (Chapters 1–6)
 │   ├── database.py            # SQLite connection pool & query helpers
 │   ├── main.py                # FastAPI routes & WebSocket server
-│   ├── optimizer.py           # Competitor scraping & spaCy NLP optimizer
-│   ├── scraper.py             # Playwright stealth & CAPTCHA tracker
-│   └── tracker.py             # Scheduled keyword rank checking
+│   ├── optimizer.py           # spaCy NLP optimizer (Chapter 1.2 / Ephemeral content engine)
+│   ├── scraper.py             # Playwright stealth & CAPTCHA tracker (Stealth Layer)
+│   ├── tools.py               # Standalone Utility Tools Suite (Chapter 12)
+│   └── tracker.py             # Scheduled keyword rank checking (Chapter 8)
 ├── Dockerfile                 # Playwright base & VNC configurations
 ├── docker-compose.yml         # Container mapping orchestrations
 ├── entrypoint.sh              # Start-up scripts for virtual desktops & servers

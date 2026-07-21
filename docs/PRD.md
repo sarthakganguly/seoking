@@ -1,143 +1,292 @@
 # **Product Requirements Document (PRD)**
 
-**SEO King: Phase 1 — Local-First SEO Platform**
+## **SEO King: Google Search Central Risk Auditor & Platform**
 
-## **1\. Executive Summary**
+---
 
-Project Stealth is a locally hosted, zero-dependency SEO tracking and content optimization platform. Designed to eliminate the multi-million dollar overhead of SaaS backends, it relies entirely on local execution, direct web scraping, and containerized deployment.
+## **1. Executive Summary**
 
-Phase 1 focuses exclusively on establishing a resilient data-gathering pipeline for a single user without relying on any third-party APIs (e.g., DataForSEO, Ahrefs, GSC) or external cloud servers.
+**SEO King** is a locally hosted, zero-dependency, local-first search engine optimization (SEO) tracking and content optimization platform. It is designed to run entirely on user-owned hardware (optimized for a ThinkPad X230 with Intel Core i5/i7 3rd Gen, 8GB-16GB RAM) and Ubuntu Server, eliminating the need for expensive third-party SaaS backends.
 
-### **Target Environment & NFRs (Non-Functional Requirements)**
+The primary goal of SEO King is to audit user websites against Google Search Central guidelines, flag technical, content, and SEO risks, explain their severity, and provide actionable mitigation checklists. It relies on direct, local Playwright browser automation combined with human-in-the-loop CAPTCHA resolution via virtual displays (noVNC), ensuring zero external commercial API dependencies.
 
-* **Hardware Context:** Optimized to run entirely on a ThinkPad X230 (Intel Core i5/i7 3rd Gen, 8GB-16GB RAM). Application memory footprint must be aggressively managed.  
-* **Host OS:** Ubuntu Server.  
-* **Deployment:** 100% Dockerized (docker-compose). Application must spin up locally with zero host-level dependencies.  
-* **Persistent Storage:** The SQLite database and local configuration files *must* be mapped to a persistent host volume outside the container to prevent data loss during container restarts or updates.  
-* **Network Dependency:** Operates strictly from the user's local residential IP. No proxy rotation or data center proxy routing in Phase 1\.  
-* **API Dependency:** Zero external commercial API calls. All Google Search data must be obtained via direct browser automation.
+---
 
-## **2\. User Interface & Experience Architecture**
+## **2. User Interface & Experience Architecture**
 
-### **Layout & Navigation**
+*   **Sidebar Navigation:** A persistent left-hand sidebar hosting links to all core chapters, dashboards, standalone tools, and settings.
+*   **Primary Workspace:** A responsive right-hand panel where dynamic pages, detailed audit tables, editor interfaces, and diagrams render.
+*   **Viewport Support:** Fully responsive CSS supporting Mobile, Tablet, and Desktop screens.
+*   **Theming:** Dynamic Light and Dark modes utilizing native CSS variables.
+*   **Data Portability:** Every data table (e.g., page audits, keyword ranking histories) must feature a "Download CSV" button for local export.
+*   **Authentication & User Management:** 100% local login (username/password stored in SQLite). Upon initial signup, a unique recovery code is generated. If lost, the account is unrecoverable.
+*   **Settings Screen:** Manage default crawl depths, crawling schedules, concurrency limits, geolocations, and theme preferences.
 
-* **Sidebar Navigation:** The application will utilize a persistent left-hand sidebar containing navigation links to all core modules (Dashboard, Site Audit, Content Optimizer, Rank Tracker, Performance Audit, Settings).  
-* **Primary Workspace:** The right-hand pane will act as the dynamic workspace where all module interfaces, editors, and data tables are rendered.
+---
 
-### **Responsive & Modern Design**
+## **3. Core Platform Chapters (Auditing & Tracking)**
 
-* **Viewport Support:** The UI must be fully responsive, seamlessly adapting to Mobile, Tablet, and Desktop viewports.  
-* **Theming:** The application will support both Light and Dark themes, adhering to modern web design standards (utilizing native CSS variables).  
-* **Data Portability:** Every data table across all modules (Audit, Rank Tracker, Entities, Performance Audit) must feature a "Download CSV" button for local data extraction.
+The core scanning and auditing pipeline evaluates websites page-by-page across eight specialized chapters.
 
-### **Authentication & User Management**
+### **Chapter 1: Fundamentals (SEO & Content Basics)**
 
-* **Local-Only Authentication:** User login is entirely local via username and password stored in the SQLite database. No external identity providers (OAuth, Google, etc.) will be used.  
-* **Account Recovery:** Upon account creation, the user is provided a one-time unique recovery code. If the password is forgotten and the recovery code is lost, the account cannot be recovered, and a new user must be created.
+#### **1.1 Title & Meta Optimization Auditor**
+*   **Description:** Scans every page on the site to audit title tags and meta descriptions.
+*   **Risks Audited:** Missing, duplicate, truncated (too long: >60 chars title, >160 chars meta), too short (<30 chars title, <120 chars meta), or generic titles (e.g., "Home", "Untitled").
+*   **Impact:** Prevents search engines from generating uninformative search snippets, protecting CTR.
+*   **Audience Views:** Non-technical warning gauges (green/yellow/red) and developer CSV exports.
 
-### **Settings Configuration**
+#### **1.2 E-E-A-T & Helpful Content Quality Scanner**
+*   **Description:** Heuristically analyzes page text copy.
+*   **Risks Audited:** Pages with search-engine-first content, thin content (<300 words), keyword stuffing, lack of credentials (author info), or missing source citations.
+*   **Impact:** Ensures pages are not flagged by Google's Helpful Content System.
+*   **Audience Views:** A simple "Helpful Content Score" with actionable text improvement checklists.
 
-* **User Preferences:** A dedicated Settings screen accessible from the sidebar.  
-* **Stored Configurations:** Allows the user to toggle UI themes (Light/Dark), manage default crawl depths, configure preferred keyword tracking schedules, and manage the technical parameters below.
+#### **1.3 AI-Content Quality Guardrails Scan**
+*   **Description:** Scans page copy for hallmarks of raw, automated content production.
+*   **Risks Audited:** Mass-produced automated patterns without human editing, and factual verification risks (hallucinations).
+*   **Impact:** Protects the site against automated spam updates.
 
-## **3\. The "Stealth" Layer: CAPTCHA Resolution & Extraction Logistics**
+#### **1.4 Google Discover Eligibility Checker**
+*   **Description:** Inspects articles for Google Discover inclusion requirements.
+*   **Risks Audited:** Missing `max-image-preview:large` robots directive, clickbait headlines, and small images (width < 1200px).
+*   **Impact:** Unlocks high-volume distribution in Google Discover feeds.
 
-### **CAPTCHA Handling**
+#### **1.5 Search Essentials Technical Compliance Scan**
+*   **Description:** Checks site pages against basic Google Search Essentials guidelines.
+*   **Risks Audited:** Non-200 status codes, indexing blocks, hidden text, and sneaky redirects.
+*   **Impact:** Flags severe compliance problems that could trigger manual actions or total de-indexing.
 
-Because Phase 1 utilizes direct scraping without IP rotation, Google will inevitably block automated requests with a CAPTCHA. The application must gracefully suspend scraping and securely pass the CAPTCHA to the human operator.
+---
 
-* **Detection:** The internal Playwright/Puppeteer script must monitor for 302 redirects to Google's reCAPTCHA/Turnstile pages or specific DOM elements indicating a block.  
-* **State Pausing:** Upon detection, the script pauses the queue to prevent further blocks and alerts the UI dashboard via WebSockets.  
-* **GUI Exposure (VNC Passthrough):** The headless Docker container runs a lightweight virtual display (Xvfb) and a VNC stream (noVNC).  
-* **User Resolution:** The user accesses the application's local web dashboard, clicks "Solve CAPTCHA", and interacts with the embedded VNC browser frame to manually clear the block.  
-* **Resumption:** Upon successful navigation back to the SERP, the script saves fresh session cookies locally, closes the VNC stream, and resumes the scrape queue.
+### **Chapter 2: Crawling and Indexing**
 
-### **Resource & Request Constraints (Configurable via Settings)**
+#### **2.1 Sitemap Integrator & Health Auditor**
+*   **Description:** Discovers and validates XML, TXT, and RSS sitemaps declared in `robots.txt` or site headers.
+*   **Risks Audited:** Sitemaps >50MB or >50,000 URLs, invalid XML schemas, sitemap links returning non-200 codes, or blocked by noindex.
+*   **Impact:** Prevents wasting Google's crawl budget on dead pages.
 
-To prevent hardware throttling on the ThinkPad X230, the scraping logic must be strictly governed:
+#### **2.2 Canonicalization & Duplication Risk Scan**
+*   **Description:** Audits duplicate URL paths and canonical declarations.
+*   **Risks Audited:** Missing canonical tags, canonical mismatches (pointing to different domains or 404s), or DOM vs raw HTML canonical discrepancies.
+*   **Impact:** Avoids rank dilution and duplicate indexing issues.
 
-* **Concurrency Limits:** Users can set the "Max Concurrent Browser Tabs" (default: 3, max: 5\) to prevent RAM exhaustion.  
-* **Humanized Jitter:** Users can define a "Request Delay Range" (e.g., 3000ms \- 8000ms) to inject random pauses between automated searches, reducing detection rates.
+#### **2.3 Crawlability & HTTP Status Code Diagnoser**
+*   **Description:** Checks server response codes and crawl paths.
+*   **Risks Audited:** Broken links (404), soft 404s, redirect loops, and link element violations (e.g., buttons using onclick JS functions instead of `href` anchors).
+*   **Impact:** Ensures crawl bots can map and reach all sub-pages.
 
-### **Geolocation Spoofing (Configurable via Settings)**
+#### **2.4 JavaScript Rendering & SPA SEO Auditor**
+*   **Description:** Compares raw initial HTML responses against fully rendered browser DOMs.
+*   **Risks Audited:** Dynamic tags (titles, meta, canonicals, links) failing to render, or lazy-loaded assets missing noscript fallbacks.
+*   **Impact:** Protects Single Page Applications from indexing failures.
 
-* **Locale Manipulation:** To fetch accurate SERPs for target markets, users can define their target Geolocation (Latitude/Longitude), Locale (e.g., en-US, en-GB), and TimezoneId in the settings. The browser engine will natively inject these properties into the scraping context.
+#### **2.5 Mobile-First Indexing Parity Scanner**
+*   **Description:** Compares desktop and mobile browser renders of the same URL.
+*   **Risks Audited:** Mismatched meta tags, discrepancies in text copy, different header hierarchies, or missing schema markup on mobile.
+*   **Impact:** Prevents content from being ignored by Google's mobile-first crawler.
 
-## **4\. Core Modules (Phase 1 Scope)**
+#### **2.6 AMP Validation Checker**
+*   **Description:** Checks AMP page markup validity.
+*   **Risks Audited:** AMP validation errors (invalid custom elements, CSS limit > 75KB), and content differences between canonical and AMP variants.
+*   **Impact:** Restores eligibility for mobile AMP search carousels.
 
-### **Module 1: Technical Site Audit \[Local Execution\]**
+#### **2.7 Index Blocking & Safe Removal Auditor**
+*   **Description:** Scans index block directives and link attribute scopes.
+*   **Risks Audited:** Mishandled `noindex` directives (e.g., a page blocked in `robots.txt` containing a `noindex` tag, preventing Googlebot from crawling it to read the block), and missing qualifiers on paid or user-generated outbound links (`sponsored`, `ugc`, `nofollow`).
+*   **Impact:** Prevents leakage of search indexing permissions and paid-link penalties.
 
-Behaves as a local diagnostic scanner for a single, user-defined domain, expanded to evaluate 16 rigorous technical SEO metrics:
+#### **2.8 Site Migration & Redirection Health Check**
+*   **Description:** Verifies URL transition paths.
+*   **Risks Audited:** Crawling temporary 302 redirects instead of permanent 301, redirect chains (> 2 hops), or generic "all redirects to homepage" mappings.
+*   **Impact:** Preserves PageRank and domain transition authority.
 
-1. **Robots.txt & Sitemap Audit:** Scans robots.txt directives and discovers/indexes XML sitemaps recursively (run-wide).
-2. **Orphan Page Detection:** Cross-references crawled URLs with sitemap URLs to discover orphan paths (run-wide).
-3. **JS-Dependent Rendering Risk:** Heuristically flags pages showing low raw word counts coupled with frontend frameworks (React, Vue, Next.js, Nuxt, etc.).
-4. **Canonicalization Checks:** Validates presence and accuracy of canonical target links, flagging external target mismatches.
-5. **Robots Meta Noindex Audits:** Scans `<meta name="robots">` and `X-Robots-Tag` HTTP headers to flag indexing blocks.
-6. **HTTP Status Code Compliance:** Logs server response codes (healthy 200s, redirects 3xx, broken 404s, etc.).
-7. **Title Tag Analysis:** Flags missing, duplicate, too short (<30 chars), or too long (>60 chars) title tags.
-8. **Meta Description Analysis:** Flags missing, duplicate, too short (<120 chars), or too long (>160 chars) meta descriptions.
-9. **H1 Tag Audits:** Verifies presence and uniqueness of H1 tags.
-10. **Header Hierarchy Levels:** Maps the full H1-H6 tree, flagging skipped levels (e.g. H1 straight to H3).
-11. **Thin Content Check:** Logs total body words and flags pages with fewer than 300 words.
-12. **Structured Data Validator:** Parses and logs JSON-LD and microdata schemas, validating JSON format.
-13. **Breadcrumbs Validator:** Detects presence of breadcrumb markup/schemas.
-14. **Taxonomy Duplication Checks:** Identifies category, tag, author, and archive URLs, checking for thin content and index status.
-15. **Pagination Tag Checks:** Identifies `rel="prev"` / `rel="next"` and page query parameters.
-16. **Anchor & Alt Text Audits:** Identifies images missing alt tags and links containing generic (e.g. "click here") or empty anchor text.
+---
 
-* **UI Interface (Expanding Diagnostic Panels):** An expanding panel drawer under each page row allows deep inspection of the technical checklist, hierarchical header tree, structured data schemas, missing alt images, and generic anchor stats.
-* **Detailed Issues View:** The issues panel groups and normalizes crawler warnings and errors (e.g., consolidating alt tag warnings). When inspecting an issue, the UI renders a dynamic table detailing every affected URL with a context-specific column:
-  * *Title tag too short / too long:* Displays the current title tag string and character count.
-  * *Thin Content:* Displays the exact word count.
-  * *Meta description too short / too long:* Displays the current meta description and character count.
-  * *Missing Alt Tags:* Consolidates occurrences and displays a nested bulleted list of image URLs lacking alt attributes.
-  * *Broken Link (404):* Displays a list of clickable, referring page URLs indicating where the broken link is located.
-  * *Other errors / warnings:* Displays relevant, contextual statuses (such as actual canonical tags, heading lists, JS dependency, or HTTP error codes).
-* **Local Storage:** Saves crawl results, issues arrays, and structural metadata to a local SQLite database for historical comparison and CSV extraction.
+### **Chapter 3: Crawling (Infrastructure)**
 
-### **Module 2: Content Optimization Engine \[Direct Scrape\]**
+#### **3.1 Robots.txt Syntax & Security Auditor**
+*   **Description:** Evaluates `robots.txt` syntax validity and crawl restrictions.
+*   **Risks Audited:** Invalid syntax, and rules blocking CSS/JS files (which prevents Googlebot from rendering pages properly to audit page layout experience).
+*   **Impact:** Restores normal page experience rendering verification.
 
-An on-demand semantic analysis tool built for single-keyword target optimization.
+#### **3.2 User-Agent Verification & Spoofing Diagnoser**
+*   **Description:** Analyzes crawl block rules and user-agent setups.
+*   **Risks Audited:** Blocking Googlebot sub-crawlers (like Googlebot-Image), and malicious bots spoofing the Googlebot UA without passing reverse DNS validation.
+*   **Impact:** Guarantees asset indexing while preventing resource theft by malicious crawlers.
 
-* **SERP Acquisition:** User inputs a target keyword. The headless browser directly queries Google, bypasses boilerplate, and extracts the top 10 to 20 ranking organic URLs.  
-* **JS-Rendered DOM Extraction:** The scraper must wait for networkidle to ensure Single Page Applications (React/Vue competitors) are fully rendered before extracting text, bypassing raw HTML fetching limitations.  
-* **Concurrent Scraping (Limited):** Asynchronous workers download the competitor DOMs, strictly adhering to the user's defined concurrency limits.  
-* **Noise Reduction:** Runs local libraries (e.g., newspaper3k or Mozilla Readability) to strip sidebars, nav bars, and footers, leaving pure article text.  
-* **Local NLP Pipeline:** Processes the aggregate text locally using TF-IDF (or a lightweight library like spaCy) to extract the most prominent semantic entities and multi-word phrases.  
-* **Text Editor GUI:** A frontend WYSIWYG editor that scores the user's draft in real-time against the locally generated entity list.
+#### **3.3 Infinite Spaces & Crawl Budget Diagnoser**
+*   **Description:** Analyzes site URLs for crawl traps.
+*   **Risks Audited:** Faceted navigation paths generating infinite parameters, duplicate paths, and high latency responses (>2s).
+*   **Impact:** Maximizes Google's daily crawl efficiency.
 
-### **Module 3: Targeted Keyword Tracker \[Low-Volume\]**
+---
 
-A tactical, low-volume position monitor replacing commercial rank trackers.
+### **Chapter 4: Appearance (Structured Data & Search Richness)**
 
-* **Scheduled Scraping:** Executes automated Google searches for a predefined list of high-priority keywords (e.g., 20-50 queries daily).  
-* **Rank Extraction:** Parses the live SERP DOM to locate the user's specific domain URL and records the integer position (1 through 100).  
-* **Historical Dashboard:** Renders a simple line chart tracking position movements over time, stored locally.
+#### **4.1 Structured Data Policies & Semantic Validator**
+*   **Description:** Parses JSON-LD and Microdata schemas.
+*   **Risks Audited:** Syntactically invalid JSON, missing required fields, and schema-to-page mismatches (e.g., schema price different from display price).
+*   **Impact:** Protects against schema-related spam penalties.
 
-### **Module 4: Performance & Core Web Vitals Audit \[Local Execution\]**
+#### **4.2 Rich Result Opportunities Finder (Search Gallery Mapper)**
+*   **Description:** Identifies candidate schemas based on page structures.
+*   **Risks Audited:** Missing schemas for Breadcrumbs, Product reviews, Local Businesses, Events, and Articles.
+*   **Impact:** Highlights opportunities to increase CTR via search snippets (stars, prices, etc.).
 
-An on-demand performance auditing tool evaluating page speed optimization parameters.
+#### **4.3 Search Branding (Favicon & Site Name) Compliance Check**
+*   **Description:** Audits favicon assets and Site Name schemas.
+*   **Risks Audited:** Favicons not multiples of 48px square, and missing `WebSite` schema defining the official name of the site.
+*   **Impact:** Prevents Google from displaying generic icons or fallback domain names.
 
-* **Performance Observers:** Launches Chromium in headful mode, injecting Javascript `PerformanceObservers` to gather Largest Contentful Paint (LCP), Layout Shift (CLS), and Interaction to Next Paint (INP) directly from the browser window object.
-* **Simulated Interaction:** Executes automated scrolling and body clicks to trigger browser event latency and record realistic user experience metrics.
-* **Asset Auditing:** Inspects document response headers to check for CDN use (Cloudflare, CloudFront, etc.) and cache-control properties. Parses image elements to analyze lazy loading, next-generation image formats, and explicit layout dimensions (width and height attributes).
-* **Local Persistence:** Stores performance metrics and detailed JSON logs in SQLite for user lookup and comparison.
+#### **4.4 Web Stories Health Check**
+*   **Description:** Audits Web Stories against content policies.
+*   **Risks Audited:** Aspect ratio violations, thin content, missing video transcripts, and clickbait descriptions.
+*   **Impact:** Retains eligibility for Discover visual search blocks.
 
-## **5\. Out of Scope for Phase 1**
+---
 
-| Deferred Feature | Reasoning / Phase 2 Plan |
-| :---- | :---- |
-| **Proxy Rotation Layer** | Phase 1 relies on the ThinkPad's residential IP and human-in-the-loop CAPTCHA solving. Proxy management introduces configuration overhead. |
-| **Google Search Console (GSC) Sync** | Requires OAuth implementation and external API orchestration. Deflecting to Phase 2 to maintain strict "Zero API" isolation. |
-| **Global Link Graphing** | Requires persistent, massive database indexation which violates the local-first, low-memory ThinkPad environment limit. |
+### **Chapter 5: Monitor & Debug (Index Verification & Security)**
 
-## **6\. Technical Stack Blueprint**
+#### **5.1 Index Representation & Cloaking Auditor**
+*   **Description:** Compares live visitor HTML to responses returned for search engines.
+*   **Risks Audited:** Server-side cloaking (serving search bots different content than human users) and malware link injection.
+*   **Impact:** Prevents site-wide Google manual spam actions.
 
-* **Backend Automation:** Python 3.11+ / FastAPI (lightweight, asynchronous processing).  
-* **Browser Engine:** Playwright (Python wrapper) configured with Stealth plugins to minimize immediate bot detection.  
-* **Virtual Display:** Xvfb & noVNC mapped to Docker exposed ports for browser GUI interaction.  
-* **Database:** SQLite (Single file, no background daemon required, ideal for ThinkPad resource constraints).  
-* **Frontend:** Vanilla JavaScript + Vanilla CSS (served directly by FastAPI).
+#### **5.2 Security & Malware Injection Scanner**
+*   **Description:** Scans the site’s script sources, forms, and headers against Google Safe Browsing guidelines.
+*   **Risks Audited:** Malware script links, deceptive forms, and phishing vectors.
+*   **Impact:** Prevents red screen malware warnings in browsers and search results.
 
+#### **5.3 User-Generated Content (UGC) Abuse Prevention Checker**
+*   **Description:** Audits forms and comment blocks.
+*   **Risks Audited:** Comment spam injection and missing `rel="ugc"` tags.
+*   **Impact:** Safeguards domain quality flags.
 
+---
+
+### **Chapter 6: Specialty (Ecommerce, International, Explicit)**
+
+#### **6.1 Ecommerce Schema & Shopping Quality Auditor**
+*   **Description:** Checks structured data specifically for ecommerce listings.
+*   **Risks Audited:** Missing variant metadata, return policies, or shipping details.
+*   **Impact:** Maintains visibility in premium free Google Shopping placements.
+
+#### **6.2 Hreflang & International Target Check**
+*   **Description:** Audits international target mapping tags.
+*   **Risks Audited:** Missing self-referential tags, invalid country/locale codes, and broken reciprocal targets.
+*   **Impact:** Avoids serving incorrect language versions, protecting bounce rates.
+
+#### **6.3 Explicit Content & SafeSearch Isolation Checker**
+*   **Description:** Scans adult directories for rating classifications.
+*   **Risks Audited:** Missing `<meta name="rating" content="adult">` tags on adult content.
+*   **Impact:** Prevents the site from being filtered out in SafeSearch results.
+
+#### **6.4 Local SEO & Business Details Auditor**
+*   **Description:** Validates local business schemas.
+*   **Risks Audited:** Mismatching NAP (Name, Address, Phone) details across pages, and missing geocoordinates.
+*   **Impact:** Secures local Google Map placements.
+
+---
+
+### **Chapter 7: Performance & Core Web Vitals (Local Execution)**
+
+#### **7.1 Page Speed & Core Web Vitals Audit**
+*   **Description:** Integrates local browser observers to evaluate site responsiveness.
+*   **Risks Audited:** Poor Largest Contentful Paint (LCP), Cumulative Layout Shift (CLS), and Interaction to Next Paint (INP) scores.
+*   **Impact:** Identifies UX page speed ranking bottlenecks.
+
+#### **7.2 Third-Party Script & API Resource Auditor**
+*   **Description:** Scans loaded widgets (chat, analytics) blocking main execution threads.
+*   **Risks Audited:** Bloated JavaScript payloads blocking user interaction.
+*   **Impact:** Keeps Core Web Vitals scores in the green.
+
+#### **7.3 Asset & Caching Optimization Audit**
+*   **Description:** Audits static resource delivery headers and properties.
+*   **Risks Audited:** Missing CDN use, absent caching directives, missing image dimensions (width/height), and missing next-generation formats (.webp, .avif).
+*   **Impact:** Lowers page loads speeds and bandwidth use.
+
+---
+
+### **Chapter 8: Targeted Keyword Tracker (Low-Volume)**
+
+#### **8.1 Scheduled SERP Tracking**
+*   **Description:** Direct queries to Google SERPs for selected target terms.
+*   **Risks Audited:** Position drop notifications, and SERP displacements.
+*   **Impact:** Replaces commercial rank trackers locally.
+
+#### **8.2 Competitor Position Comparison**
+*   **Description:** Tracks SERP rankings of the main domain alongside up to 3 competitors.
+*   **Risks Audited:** Organic market share loss.
+*   **Impact:** Extracts competitor data without generating extra network request overhead.
+
+---
+
+## **4. Standalone Utility Tools Suite**
+
+SEO King provides interactive dashboard utilities for localized testing:
+
+1.  **Robots.txt Creator & Rule Tester:** Generate compliance texts and test bot crawl rules on target paths.
+2.  **Multi-Schema JSON-LD Markup Generator:** Form-based JSON builder outputting validated schemas (e.g., Products, local businesses).
+3.  **Sitemap XML & Media Extension Builder:** Compile URL list directories into XML files supporting standard namespaces (`image`, `video`).
+4.  **International Hreflang Alternates Mapper:** Map localized translation groups and verify country code mappings.
+5.  **Redirect Chain Tracer:** Track hop logs and confirm status codes along redirect paths.
+6.  **E-E-A-T Self-Assessment Wizard:** Interactive questionnaire based on Google's quality check guidelines.
+7.  **Discover Image & Meta Tag Builder:** Validate article images and generate `max-image-preview:large` tags.
+8.  **SafeSearch Adult Content Classifier:** Generate rating directives for adult folders.
+9.  **URL Path Cleanliness & Structure Auditor:** Check paths for spaces, mixed casing, underscores, or parameter bloat.
+10. **GSC Traffic Drop Diagnoser:** Wizard matching traffic patterns to updates and technical problems, generating Bubble Chart query directives.
+11. **Article Publication Date Consistency Checker:** Verify `datePublished` schema alignment with HTML page text.
+12. **SPA Lazy-Loading Crawler Validation Tester:** Confirm that lazy-loaded assets contain `<noscript>` fallbacks.
+13. **PDF & Document Accessibility Checker:** Validate readable texts on non-HTML static attachments.
+14. **Product Review Quality Grader:** Audit reviews for original research claims and multiple merchant links.
+15. **Paywalled Content Selector Selector:** Match paywall container IDs to schema selectors.
+16. **Search Snippet & Cache Scanner:** Highlight page elements suitable for `data-nosnippet` tags.
+17. **Server Maintenance Mode Helper:** Confirm 503 status code and `Retry-After` header responses.
+18. **Indexing API Integration Advisor:** Validate service account credentials for Google Indexing API access.
+19. **Local SEO & NAP Alignment Auditor:** Audit contact page details against footer texts to confirm consistency.
+
+---
+
+## **5. Supporting Technical Specifications**
+
+### **5.1 The "Stealth" Layer: CAPTCHA Resolution & Extraction Logistics**
+
+Direct Google SERP scraping requires robust stealth automation:
+
+*   **Detection:** The scraper checks for 302 redirects to Google's reCAPTCHA/Turnstile pages or specific warning texts.
+*   **State Pausing:** Intercepting a block triggers a WebSocket alert to the UI and pauses the scrape queue.
+*   **VNC Passthrough:** The headful browser displays inside virtual frame buffers (`Xvfb`) in the container. The VNC stream is captured via `x11vnc` and translated by `websockify` to `noVNC`.
+*   **User Action:** The web dashboard embeds the VNC stream in an `<iframe>` allowing the user to manually solve the CAPTCHA.
+*   **Resumption:** Upon successful CAPTCHA clearance, the scraper closes the VNC frame and resumes the execution queue.
+*   **Logistics Settings:**
+    *   *Concurrency:* Default 3 browser tabs (max 5) to protect ThinkPad memory.
+    *   *Jitter:* Configurable range (default 3s-8s) to simulate human delay between queries.
+    *   *Geolocation Spoofing:* Settings coordinate timezone, latitude, longitude, and locale inputs injected natively into the browser context.
+
+### **5.2 Technical Stack Blueprint**
+*   **Backend:** Python 3.11+ / FastAPI
+*   **Automation:** Playwright Python wrapper (stealth plugin enabled)
+*   **Display Stream:** Xvfb, x11vnc, websockify, noVNC
+*   **Database:** SQLite (single file storage)
+*   **Frontend:** Vanilla JS / Vanilla CSS
+
+---
+
+## **6. Non-Functional Requirements**
+
+### **6.1 Performance & Scalability**
+*   **Crawl Speed Control:** Throttles crawls dynamically based on server response latency.
+*   **Render Pipeline Limits:** Render timeouts are capped at 10 seconds per page.
+*   **Database Scaling:** JSON bulk records support indexing up to 50,000 URLs.
+
+### **6.2 Security & Compliance**
+*   **Data Privacy:** Never persist user verification keys or credentials.
+*   **Exclusions:** Identifying user-agent name is `SearchCentralAuditorBot/1.0` and respects robots.txt blocking rules.
+
+---
+
+## **7. Technical Constraints & Out-of-Scope (Phase 1)**
+*   **No Auto-Mitigations:** The software outlines risks and recommendations but does not write code fixes to the host server, Git, or CMS systems.
+*   **External CSS Parsing:** Complex stylesheet auditing is out of scope.
+*   **Proxy Rotation:** Deferred to Phase 2; Phase 1 relies on residential IP execution and human VNC interaction.

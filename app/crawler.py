@@ -460,15 +460,17 @@ class AuditCrawler:
         finally:
             conn.close()
 
-    def analyze_page_seo(self, url: str, status_code: int, response_headers: dict, html_content: bytes) -> dict:
+    @staticmethod
+    def analyze_page_seo(url: str, status_code: int, response_headers: dict, html_content: bytes) -> dict:
         """
         Parses HTML and executes 16 rigorous technical SEO checklists.
         """
         soup = BeautifulSoup(html_content, 'html.parser')
         
         # 1. Canonical URLs
-        canonical_tag = soup.find('link', attrs={'rel': 'canonical'})
-        canonical_url = canonical_tag.get('href', '').strip() if canonical_tag else None
+        canonical_tags = soup.find_all('link', attrs={'rel': 'canonical'})
+        canonical_url = canonical_tags[0].get('href', '').strip() if canonical_tags else None
+        multiple_canonicals = len(canonical_tags) > 1
         
         # 2. Noindex Tags
         is_noindex = False
@@ -532,18 +534,38 @@ class AuditCrawler:
 
         # 7. Structured schema check
         schemas_found = []
+        schema_issues = []
         malformed_schema = False
         json_ld_blocks = soup.find_all('script', attrs={'type': 'application/ld+json'})
         for block in json_ld_blocks:
             try:
                 schema_data = json.loads(block.string)
+                
+                def process_schema_item(item):
+                    if not isinstance(item, dict):
+                        return
+                    t = item.get('@type')
+                    if t:
+                        schemas_found.append(t)
+                        # Validate common schemas
+                        if t == 'Product':
+                            offers = item.get('offers', {})
+                            if isinstance(offers, list):
+                                offers = offers[0] if offers else {}
+                            if not item.get('name') or not (offers.get('price') and offers.get('priceCurrency')):
+                                schema_issues.append("Product Schema missing required fields (name, price, or priceCurrency)")
+                        elif t in ['LocalBusiness', 'Organization']:
+                            if not item.get('name') or (not item.get('address') and not item.get('telephone')):
+                                schema_issues.append(f"{t} Schema missing required fields (name, address, or telephone)")
+                        elif t == 'BreadcrumbList':
+                            if not item.get('itemListElement'):
+                                schema_issues.append("BreadcrumbList Schema missing itemListElement")
+                                
                 if isinstance(schema_data, dict):
-                    t = schema_data.get('@type')
-                    if t: schemas_found.append(t)
+                    process_schema_item(schema_data)
                 elif isinstance(schema_data, list):
                     for item in schema_data:
-                        t = item.get('@type')
-                        if t: schemas_found.append(t)
+                        process_schema_item(item)
             except Exception:
                 malformed_schema = True
 
@@ -581,10 +603,12 @@ class AuditCrawler:
         next_link = soup.find('link', attrs={'rel': 'next'})
         has_pagination = (prev_link is not None or next_link is not None or "?page=" in url.lower() or "&p=" in url.lower())
 
-        # 11. Links generic / empty anchor checks
+        # 11. Links generic / empty anchor checks & UGC
         total_links = 0
         empty_anchors = 0
         generic_anchors = 0
+        ugc_links = 0
+        nofollow_links = 0
         generic_terms = {'click here', 'read more', 'learn more', 'link', 'more', 'here', 'go', 'view'}
         for a in soup.find_all('a', href=True):
             total_links += 1
@@ -593,6 +617,34 @@ class AuditCrawler:
                 empty_anchors += 1
             elif a_text in generic_terms:
                 generic_anchors += 1
+                
+            rel_attr = a.get('rel', [])
+            if isinstance(rel_attr, str):
+                rel_attr = rel_attr.split()
+            rel_lower = [r.lower() for r in rel_attr]
+            if 'ugc' in rel_lower:
+                ugc_links += 1
+            if 'nofollow' in rel_lower:
+                nofollow_links += 1
+
+        # 11b. Third-party scripts
+        parsed_current = urllib.parse.urlparse(url)
+        third_party_scripts = 0
+        for s in soup.find_all('script', src=True):
+            src = s.get('src')
+            if src.startswith(('http://', 'https://')):
+                parsed_src = urllib.parse.urlparse(src)
+                if parsed_src.netloc and parsed_src.netloc != parsed_current.netloc:
+                    third_party_scripts += 1
+                    
+        # 11c. Explicit Content & E-E-A-T
+        is_explicit = False
+        rating_meta = soup.find('meta', attrs={'name': 'rating'})
+        if rating_meta and rating_meta.get('content', '').lower() in ['adult', 'rta-5042-1996-1400-1577-rta']:
+            is_explicit = True
+            
+        author_meta = soup.find('meta', attrs={'name': 'author'})
+        has_author = author_meta is not None
 
         # 12. Gather Audit Issues
         issues = []
@@ -606,6 +658,11 @@ class AuditCrawler:
             elif len(title_str) > 60:
                 issues.append("Title Tag too long")
                 
+            title_str_lower = title_str.lower()
+            clickbait_phrases = ["you won't believe", "shocking", "here's why", "what happens next", "will make you", "this trick"]
+            if any(phrase in title_str_lower for phrase in clickbait_phrases):
+                issues.append("Potential Clickbait Title (E-E-A-T risk)")
+                
         meta_desc_tag = soup.find('meta', attrs={'name': 'description'})
         if not meta_desc_tag:
             issues.append("Missing Meta Description")
@@ -618,6 +675,8 @@ class AuditCrawler:
                 
         if not canonical_url:
             issues.append("Missing Canonical Tag")
+        elif multiple_canonicals:
+            issues.append("Multiple Canonical Tags")
         elif canonical_url != url:
             if canonical_url.replace("https://", "http://").rstrip("/") != url.replace("https://", "http://").rstrip("/"):
                 issues.append("Canonical Mismatch")
@@ -627,6 +686,21 @@ class AuditCrawler:
         elif h1_count > 1:
             issues.append("Multiple H1 Headers")
             
+        if is_explicit:
+            issues.append("Explicit Content Tagged (SafeSearch)")
+        if third_party_scripts > 5:
+            issues.append(f"High Third-Party Script Payload ({third_party_scripts} external scripts)")
+        if word_count > 500 and not has_author:
+            issues.append("Missing Author/E-E-A-T Signals on long content")
+            
+        # Soft 404 Check
+        if status_code == 200:
+            title_text = (title_tag.string or '').lower() if title_tag else ''
+            h1_tag = soup.find('h1')
+            h1_text = h1_tag.get_text().strip().lower() if h1_tag else ''
+            if '404' in title_text or 'not found' in title_text or '404' in h1_text or 'not found' in h1_text:
+                issues.append("Soft 404 Detected (Returns 200 OK but indicates not found)")
+                
         if violations:
             issues.extend(violations)
         if thin_content:
@@ -637,6 +711,8 @@ class AuditCrawler:
             issues.append("Missing Alt Tags")
         if malformed_schema:
             issues.append("Malformed Schema Markup")
+        if schema_issues:
+            issues.extend(schema_issues)
         if is_taxonomy and thin_content:
             issues.append("Redundant Taxonomy Page")
 
@@ -676,8 +752,13 @@ class AuditCrawler:
                 "links": {
                     "total": total_links,
                     "empty_anchors": empty_anchors,
-                    "generic_anchors": generic_anchors
-                }
+                    "generic_anchors": generic_anchors,
+                    "ugc_links": ugc_links,
+                    "nofollow_links": nofollow_links
+                },
+                "third_party_scripts": third_party_scripts,
+                "is_explicit": is_explicit,
+                "has_author": has_author
             }
         }
 

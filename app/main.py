@@ -10,17 +10,19 @@ from pydantic import BaseModel
 from app.database import init_db, get_db_connection, get_user_setting, set_user_setting
 from app.auth import (
     register_user, authenticate_user, recover_account, 
-    create_session, get_user_from_session, delete_session, ACTIVE_SESSIONS
+    create_session, get_user_from_session, delete_session, ACTIVE_SESSIONS, get_current_user
 )
 import app.scraper as scraper
 from app.crawler import start_crawl_job, ACTIVE_CRAWLS
 from app.optimizer import optimize_keyword_content
 from app.tracker import run_scheduled_rank_tracker, start_background_tracker
 from app.performance import run_performance_audit_job
+from app.tools import router as tools_router
 
 logger = logging.getLogger("seoking.main")
 
 app = FastAPI(title="SEO King", version="1.0.0")
+app.include_router(tools_router)
 
 # Global set to track active websocket connections for real-time alerts
 CONNECTED_WEBSOCKETS = set()
@@ -53,15 +55,6 @@ async def broadcast_ws_message(data: dict):
             inactive_websockets.add(ws)
     for ws in inactive_websockets:
         CONNECTED_WEBSOCKETS.remove(ws)
-
-# Dependency to check session authentication
-async def get_current_user(session_token: str = Cookie(None)):
-    if not session_token:
-        raise HTTPException(status_code=401, detail="Session cookie missing")
-    user_id = get_user_from_session(session_token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Session invalid or expired")
-    return user_id
 
 # Pydantic schemas for request validation
 class RegisterReq(BaseModel):

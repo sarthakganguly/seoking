@@ -152,3 +152,75 @@ async def scrape_url(user_id: int, target_url: str) -> str:
         content = await page.content()
         await browser.close()
         return content
+
+async def audit_mobile_rendering(user_id: int, target_url: str) -> list[str]:
+    """
+    Audits a page for mobile responsiveness issues using Playwright.
+    Returns a list of issues found (e.g. horizontal scrolling, intrusive interstitials).
+    """
+    browser_options = await get_browser_options(user_id)
+    # Override for mobile
+    browser_options["user_agent"] = "Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36"
+    browser_options["viewport"] = {"width": 375, "height": 812}
+    browser_options["is_mobile"] = True
+    browser_options["has_touch"] = True
+    
+    issues = []
+    
+    async with async_playwright() as p:
+        logger.info(f"Launching headful Chromium for mobile audit: {target_url}")
+        browser = await p.chromium.launch(
+            headless=False,
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+        )
+        context = await browser.new_context(**browser_options)
+        page = await context.new_page()
+        await stealth_async(page)
+        
+        try:
+            await page.goto(target_url, timeout=30000)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=15000)
+            except Exception:
+                pass # Proceed even if network isn't completely idle
+            
+            # Check horizontal overflow
+            has_horizontal_scroll = await page.evaluate('''() => {
+                return document.documentElement.scrollWidth > window.innerWidth;
+            }''')
+            if has_horizontal_scroll:
+                issues.append("Mobile horizontal scrolling detected (overflow)")
+                
+            # Check for potential intrusive interstitials (fixed position divs covering a lot of screen)
+            has_interstitial = await page.evaluate('''() => {
+                const elements = document.querySelectorAll('div, section');
+                for (let el of elements) {
+                    const style = window.getComputedStyle(el);
+                    if ((style.position === 'fixed' || style.position === 'absolute') && parseInt(style.zIndex) > 90) {
+                        const rect = el.getBoundingClientRect();
+                        const area = rect.width * rect.height;
+                        const screenArea = window.innerWidth * window.innerHeight;
+                        if (area > screenArea * 0.8 && rect.top < window.innerHeight / 2 && style.display !== 'none' && style.visibility !== 'hidden') {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }''')
+            if has_interstitial:
+                issues.append("Intrusive interstitial detected on mobile load")
+                
+            # Check for viewport meta tag
+            has_viewport = await page.evaluate('''() => {
+                const meta = document.querySelector('meta[name="viewport"]');
+                return meta !== null && meta.content.includes('width=device-width');
+            }''')
+            if not has_viewport:
+                issues.append("Missing or invalid mobile viewport meta tag")
+
+        except Exception as e:
+            logger.error(f"Mobile audit failed for {target_url}: {e}")
+        finally:
+            await browser.close()
+            
+    return issues

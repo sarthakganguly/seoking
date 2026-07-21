@@ -1,6 +1,7 @@
 import hashlib
 import secrets
 import logging
+from fastapi import Cookie, HTTPException
 from app.database import get_db_connection
 
 logger = logging.getLogger("seoking.auth")
@@ -8,6 +9,15 @@ logger = logging.getLogger("seoking.auth")
 # In-memory session store (mapping session_token -> user_id)
 # Extremely simple and lightweight for a local single-user system.
 ACTIVE_SESSIONS = {}
+
+# Dependency to check session authentication
+async def get_current_user(session_token: str = Cookie(None)):
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Session cookie missing")
+    user_id = get_user_from_session(session_token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Session invalid or expired")
+    return user_id
 
 def hash_string(plain_text: str, salt: str = None) -> str:
     """

@@ -83,7 +83,7 @@ function initApp() {
     connectWebSocket();
     
     // Default initial view fetch
-    switchView("dashboard");
+    handleHashRouting();
 }
 
 // ----------------- EVENT LISTENERS SETUP -----------------
@@ -94,9 +94,12 @@ function setupEventListeners() {
         item.addEventListener("click", (e) => {
             e.preventDefault();
             const target = item.getAttribute("data-target");
-            switchView(target);
+            window.location.hash = '#/' + target;
         });
     });
+
+    // Hash routing
+    window.addEventListener("hashchange", handleHashRouting);
 
     // Theme toggle button click
     document.getElementById("theme-toggle-btn").addEventListener("click", toggleTheme);
@@ -115,6 +118,14 @@ function setupEventListeners() {
         e.preventDefault();
         showAuthSection("login-form");
     });
+    document.getElementById("go-to-register").addEventListener("click", (e) => {
+        e.preventDefault();
+        showAuthSection("register-form");
+    });
+    document.getElementById("register-to-login").addEventListener("click", (e) => {
+        e.preventDefault();
+        showAuthSection("login-form");
+    });
 
     // Module submissions
     document.getElementById("audit-start-form").addEventListener("submit", handleStartAudit);
@@ -125,6 +136,33 @@ function setupEventListeners() {
     
     // Audit cancellation button
     document.getElementById("cancel-run-btn").addEventListener("click", handleCancelAudit);
+}
+
+// ----------------- CLIENT ROUTER -----------------
+function handleHashRouting() {
+    let hash = window.location.hash.substring(2); // remove '#/'
+    if (!hash) {
+        hash = "dashboard";
+    }
+    
+    if (hash.startsWith("tools/")) {
+        const toolId = hash.split("/")[1];
+        switchView("single-tool"); 
+        
+        // Highlight tools hub in sidebar
+        document.querySelectorAll(".menu-item").forEach(item => {
+            if (item.getAttribute("data-target") === "tools-hub") {
+                item.classList.add("active");
+            }
+        });
+        document.getElementById("breadcrumb-current").innerText = "Tools";
+
+        if (typeof renderSingleTool === 'function') {
+            renderSingleTool(toolId);
+        }
+    } else {
+        switchView(hash);
+    }
 }
 
 // ----------------- WEBSOCKET CONNECTION MANAGER -----------------
@@ -246,6 +284,8 @@ function switchView(viewName) {
         loadTrackedKeywords();
     } else if (viewName === "settings") {
         loadSettingsToForm();
+    } else if (viewName === "tools-hub") {
+        if(typeof initToolsHub === 'function') initToolsHub();
     }
 }
 
