@@ -1,31 +1,3 @@
-const SCHEMA_PROPS = {
-    Article: ["headline", "image", "datePublished", "dateModified", "author", "publisher"],
-    BlogPosting: ["headline", "image", "datePublished", "dateModified", "author", "publisher"],
-    BreadcrumbList: ["itemListElement"],
-    ClaimReview: ["claimReviewed", "reviewRating", "author", "datePublished", "itemReviewed"],
-    Course: ["name", "description", "provider"],
-    Dataset: ["name", "description", "creator", "license", "distribution"],
-    EmployerAggregateRating: ["itemReviewed", "ratingValue", "ratingCount"],
-    Event: ["name", "startDate", "endDate", "location", "image", "description", "offers", "performer", "organizer", "eventStatus"],
-    FAQPage: ["mainEntity"],
-    HowTo: ["name", "description", "step", "image", "estimatedCost", "totalTime", "supply", "tool"],
-    ImageObject: ["contentUrl", "creator", "creditText", "copyrightNotice", "license", "acquireLicensePage"],
-    JobPosting: ["title", "description", "datePosted", "validThrough", "employmentType", "hiringOrganization", "jobLocation", "baseSalary"],
-    LocalBusiness: ["name", "image", "@id", "url", "telephone", "address", "geo", "openingHoursSpecification", "priceRange", "department"],
-    Movie: ["name", "image", "dateCreated", "director", "actor"],
-    NewsArticle: ["headline", "image", "datePublished", "dateModified", "author", "publisher"],
-    Organization: ["name", "url", "logo", "sameAs", "contactPoint"],
-    Person: ["name", "url", "image", "jobTitle", "worksFor", "sameAs"],
-    Product: ["name", "image", "description", "brand", "sku", "gtin", "gtin8", "gtin12", "gtin13", "gtin14", "offers", "aggregateRating", "review"],
-    ProfilePage: ["mainEntity"],
-    QAPage: ["mainEntity"],
-    Recipe: ["name", "image", "author", "datePublished", "description", "prepTime", "cookTime", "totalTime", "recipeYield", "recipeCategory", "recipeCuisine", "nutrition", "recipeIngredient", "recipeInstructions", "video"],
-    Review: ["itemReviewed", "author", "reviewRating", "datePublished", "reviewBody", "publisher"],
-    SoftwareApplication: ["name", "operatingSystem", "applicationCategory", "aggregateRating", "offers"],
-    VideoObject: ["name", "description", "thumbnailUrl", "uploadDate", "contentUrl", "embedUrl", "duration", "interactionStatistic", "regionsAllowed"],
-    WebSite: ["name", "url", "potentialAction"]
-};
-
 const TOOLS_REGISTRY = [
     { id: "robots", name: "Robots.txt Creator", desc: "Generate valid robots rules.", action: "Create", endpoint: "/api/tools/robots-txt-creator", fields: [{id: "r-crawlers", label: "Target Crawlers", type: "list", placeholder: "e.g., Googlebot"}, {id: "r-allow", label: "Allow Paths", type: "list", placeholder: "e.g., /public/"}, {id: "r-disallow", label: "Disallow Paths", type: "list", placeholder: "e.g., /admin/"}] },
     { id: "schema", name: "Schema Markup Generator", desc: "Create JSON-LD schemas.", action: "Generate", endpoint: "/api/tools/schema-generator", fields: [{id: "s-builder", type: "schema_builder"}] },
@@ -83,7 +55,7 @@ function renderSingleTool(id) {
     tool.fields.forEach(f => {
         const group = document.createElement('div');
         group.className = 'form-group';
-        group.innerHTML = `<label style="display:block; margin-bottom:5px; font-weight:600;">${f.label}</label>`;
+        group.innerHTML = `<label style="display:block; margin-bottom:5px; font-weight:600;">${f.label || ''}</label>`;
         
         if (f.type === 'textarea') {
             group.innerHTML += `<textarea id="${f.id}" class="tool-input" rows="4" placeholder="${f.placeholder || ''}"></textarea>`;
@@ -118,16 +90,19 @@ function renderSingleTool(id) {
              `).join('');
              group.innerHTML += checks;
         } else if (f.type === 'schema_builder') {
-             const typeOptions = Object.keys(SCHEMA_PROPS).map(k => `<option value="${k}">${k}</option>`).join('');
+             const typeOptions = Object.keys(SCHEMA_TEMPLATES).map(k => `<option value="${k}">${k}</option>`).join('');
              group.innerHTML += `
                 <div style="margin-bottom:10px;">
                     <label style="display:block; font-weight:600;">Schema Type</label>
-                    <select id="${f.id}-type" class="tool-input" onchange="renderSchemaProps('${f.id}')">${typeOptions}</select>
+                    <select id="${f.id}-type" class="tool-input" onchange="renderSchemaForm('${f.id}')">${typeOptions}</select>
                 </div>
-                <div id="${f.id}-props" style="margin-top:15px; border-top:1px solid #333; padding-top:15px;"></div>
+                <div id="${f.id}-form" style="margin-top:15px;"></div>
+                <div style="margin-top:20px; border-top:1px solid #444; padding-top:15px;">
+                    <label style="display:block; font-weight:600; margin-bottom:8px;">Live JSON-LD Preview</label>
+                    <pre id="${f.id}-preview" style="background:#0d1117; border:1px solid #333; border-radius:6px; padding:15px; color:#7ee787; font-size:0.85em; max-height:400px; overflow:auto; white-space:pre-wrap;"></pre>
+                </div>
              `;
-             // Render initial properties later after appending to DOM
-             setTimeout(() => renderSchemaProps(f.id), 0);
+             setTimeout(() => renderSchemaForm(f.id), 0);
         } else {
             group.innerHTML += `<input type="${f.type}" id="${f.id}" placeholder="${f.placeholder || ''}" class="tool-input">`;
         }
@@ -205,73 +180,234 @@ window.removeKeyValueItem = function(id, key) {
     renderDynamicKeyValue(id, obj);
 };
 
-window.renderSchemaProps = function(id) {
-    const typeSelect = document.getElementById(`${id}-type`);
-    const container = document.getElementById(`${id}-props`);
+// ========== Recursive Schema Form Builder ==========
+let _schemaCounter = 0;
+
+window.renderSchemaForm = function(builderId) {
+    const typeSelect = document.getElementById(`${builderId}-type`);
+    const container = document.getElementById(`${builderId}-form`);
     if (!typeSelect || !container) return;
-    
+
     const type = typeSelect.value;
-    const props = SCHEMA_PROPS[type] || [];
-    
-    let html = `<label style="display:block; font-weight:600; margin-bottom:10px;">Properties for ${type}</label>`;
-    props.forEach(p => {
-        html += `
-            <div style="display:flex; margin-bottom:8px; align-items:center;">
-                <div style="width:150px; font-weight:bold; font-size:0.9em; color:#ddd;">${p}</div>
-                <input type="text" id="${id}-prop-${p}" class="tool-input schema-prop-input" data-prop="${p}" placeholder="Value" style="flex:1;">
-            </div>
-        `;
+    const template = SCHEMA_TEMPLATES[type];
+    if (!template) { container.innerHTML = ''; return; }
+
+    _schemaCounter = 0;
+    container.innerHTML = buildFieldsHTML(template, builderId, 0);
+
+    container.querySelectorAll('input, select, textarea').forEach(el => {
+        el.addEventListener('input', () => updateSchemaPreview(builderId));
     });
-    
-    html += `
-        <div style="margin-top:15px; border-top:1px dashed #444; padding-top:10px;">
-            <label style="display:block; font-weight:bold; margin-bottom:5px; font-size:0.9em;">Add Custom Property</label>
-            <div style="display:flex; gap:10px;">
-                <input type="text" id="${id}-custom-key" placeholder="Custom Property" class="tool-input" style="flex:1;">
-                <input type="text" id="${id}-custom-val" placeholder="Value" class="tool-input" style="flex:1;">
-                <button type="button" class="btn btn-sm btn-secondary" onclick="addCustomSchemaProp('${id}')">Add</button>
-            </div>
-            <div id="${id}-custom-list" style="margin-top:10px;"></div>
-            <input type="hidden" id="${id}-custom-json" value="{}">
-        </div>
+    updateSchemaPreview(builderId);
+};
+
+function buildFieldsHTML(obj, prefix, depth) {
+    let html = '';
+    const indent = depth * 16;
+    for (const key in obj) {
+        if (key === '@type' || key === '@context') continue;
+        const val = obj[key];
+        const fieldId = `${prefix}__${key}`;
+        const labelStyle = `font-weight:600; color:${depth === 0 ? '#58a6ff' : '#d2a8ff'}; font-size:${depth === 0 ? '0.95em' : '0.88em'};`;
+
+        if (Array.isArray(val)) {
+            if (val.length > 0 && typeof val[0] === 'object' && val[0] !== null) {
+                html += `
+                <div class="schema-field" style="margin-left:${indent}px; margin-bottom:14px; border-left:3px solid #238636; padding-left:12px;">
+                    <div style="display:flex; align-items:center; margin-bottom:8px;">
+                        <label style="${labelStyle}">${key}</label>
+                        <span style="color:#8b949e; font-size:0.78em; margin-left:8px; background:#21262d; padding:1px 6px; border-radius:3px;">array</span>
+                        <button type="button" class="btn btn-sm" style="margin-left:auto; font-size:0.75em; padding:2px 10px; background:#238636; color:#fff; border:none; border-radius:4px;" onclick="addArrayItem('${prefix}', '${key}', ${depth})">+ Add ${key}</button>
+                    </div>
+                    <div id="${fieldId}-items">
+                        ${buildArrayItemHTML(fieldId, val[0], 0, depth + 1)}
+                    </div>
+                </div>`;
+            } else {
+                html += `
+                <div class="schema-field" style="margin-left:${indent}px; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; margin-bottom:6px;">
+                        <label style="${labelStyle}">${key}</label>
+                        <span style="color:#8b949e; font-size:0.78em; margin-left:8px; background:#21262d; padding:1px 6px; border-radius:3px;">list</span>
+                        <button type="button" class="btn btn-sm" style="margin-left:auto; font-size:0.75em; padding:2px 10px; background:#1f6feb; color:#fff; border:none; border-radius:4px;" onclick="addStringArrayItem('${fieldId}')">+ Add</button>
+                    </div>
+                    <div id="${fieldId}-items">
+                        <div class="string-array-row" style="display:flex; gap:6px; margin-bottom:4px; align-items:center;">
+                            <input type="text" class="tool-input schema-str-arr" data-field="${fieldId}" placeholder="${key}" style="flex:1;">
+                            <button type="button" style="background:none; border:none; color:#f85149; cursor:pointer; font-size:1.1em;" onclick="this.parentElement.remove(); updateSchemaPreview('s-builder')">&times;</button>
+                        </div>
+                    </div>
+                </div>`;
+            }
+        } else if (typeof val === 'object' && val !== null) {
+            html += `
+            <div class="schema-field" style="margin-left:${indent}px; margin-bottom:14px; border-left:3px solid #1f6feb; padding-left:12px;">
+                <label style="${labelStyle} display:block; margin-bottom:8px;">${key} <span style="color:#8b949e; font-size:0.78em; background:#21262d; padding:1px 6px; border-radius:3px;">object</span></label>
+                ${buildFieldsHTML(val, fieldId, depth + 1)}
+            </div>`;
+        } else {
+            const inputType = typeof val === 'number' ? 'number' : 'text';
+            const placeholder = val !== '' && val !== 0 ? String(val) : key;
+            const defaultVal = (typeof val === 'string' && (val.startsWith('https://schema.org/') || val.startsWith('https://example.com/'))) ? val : (typeof val === 'number' && val !== 0 ? val : '');
+            html += `
+            <div class="schema-field" style="margin-left:${indent}px; margin-bottom:8px; display:flex; align-items:center; gap:10px;">
+                <label style="${labelStyle} min-width:140px; flex-shrink:0;">${key}</label>
+                <input type="${inputType}" class="tool-input schema-val" data-field="${fieldId}" placeholder="${placeholder}" value="${defaultVal}" style="flex:1;">
+            </div>`;
+        }
+    }
+    return html;
+}
+
+function buildArrayItemHTML(fieldId, templateObj, index, depth) {
+    const itemId = `${fieldId}-${_schemaCounter++}`;
+    return `
+    <div class="schema-array-item" id="${itemId}" style="position:relative; background:#161b22; border:1px solid #30363d; border-radius:6px; padding:12px 12px 4px 12px; margin-bottom:8px;">
+        <button type="button" style="position:absolute; top:6px; right:8px; background:none; border:none; color:#f85149; cursor:pointer; font-size:1.2em; line-height:1;" onclick="removeArrayItem('${itemId}')" title="Remove">&times;</button>
+        ${buildFieldsHTML(templateObj, itemId, depth)}
+    </div>`;
+}
+
+window.addArrayItem = function(prefix, key, depth) {
+    const type = document.getElementById('s-builder-type').value;
+    const template = SCHEMA_TEMPLATES[type];
+    let arrTemplate = findTemplateArray(template, prefix, key);
+    if (!arrTemplate || !Array.isArray(arrTemplate) || arrTemplate.length === 0) return;
+
+    const fieldId = `${prefix}__${key}`;
+    const container = document.getElementById(`${fieldId}-items`);
+    if (!container) return;
+
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = buildArrayItemHTML(fieldId, arrTemplate[0], container.children.length, depth + 1);
+    const newItem = tempDiv.firstElementChild;
+    container.appendChild(newItem);
+
+    newItem.querySelectorAll('input, select, textarea').forEach(el => {
+        el.addEventListener('input', () => updateSchemaPreview('s-builder'));
+    });
+    updateSchemaPreview('s-builder');
+};
+
+function findTemplateArray(rootTemplate, prefix, key) {
+    const parts = prefix.split('__').slice(1);
+    let current = rootTemplate;
+    for (const p of parts) {
+        if (!current) return null;
+        if (Array.isArray(current[p])) {
+            current = current[p][0];
+        } else if (typeof current[p] === 'object') {
+            current = current[p];
+        }
+    }
+    return current ? current[key] : null;
+}
+
+window.addStringArrayItem = function(fieldId) {
+    const container = document.getElementById(`${fieldId}-items`);
+    if (!container) return;
+    const row = document.createElement('div');
+    row.className = 'string-array-row';
+    row.style.cssText = 'display:flex; gap:6px; margin-bottom:4px; align-items:center;';
+    row.innerHTML = `
+        <input type="text" class="tool-input schema-str-arr" data-field="${fieldId}" placeholder="" style="flex:1;">
+        <button type="button" style="background:none; border:none; color:#f85149; cursor:pointer; font-size:1.1em;" onclick="this.parentElement.remove(); updateSchemaPreview('s-builder')">&times;</button>
     `;
-    container.innerHTML = html;
+    container.appendChild(row);
+    row.querySelector('input').addEventListener('input', () => updateSchemaPreview('s-builder'));
 };
 
-window.addCustomSchemaProp = function(id) {
-    const key = document.getElementById(`${id}-custom-key`).value.trim();
-    const val = document.getElementById(`${id}-custom-val`).value.trim();
-    if (!key || !val) return;
-    
-    const hidden = document.getElementById(`${id}-custom-json`);
-    const obj = JSON.parse(hidden.value || "{}");
-    obj[key] = val;
-    hidden.value = JSON.stringify(obj);
-    
-    const list = document.getElementById(`${id}-custom-list`);
-    list.innerHTML = Object.keys(obj).map(k => `
-        <div class="badge badge-secondary" style="margin:2px; display:inline-block;">
-            ${k}: ${obj[k]} <span style="cursor:pointer; margin-left:5px;" onclick="removeCustomSchemaProp('${id}', '${k}')">&times;</span>
-        </div>
-    `).join('');
-    
-    document.getElementById(`${id}-custom-key`).value = '';
-    document.getElementById(`${id}-custom-val`).value = '';
+window.removeArrayItem = function(itemId) {
+    const el = document.getElementById(itemId);
+    if (el) el.remove();
+    updateSchemaPreview('s-builder');
 };
 
-window.removeCustomSchemaProp = function(id, key) {
-    const hidden = document.getElementById(`${id}-custom-json`);
-    const obj = JSON.parse(hidden.value || "{}");
-    delete obj[key];
-    hidden.value = JSON.stringify(obj);
-    
-    const list = document.getElementById(`${id}-custom-list`);
-    list.innerHTML = Object.keys(obj).map(k => `
-        <div class="badge badge-secondary" style="margin:2px; display:inline-block;">
-            ${k}: ${obj[k]} <span style="cursor:pointer; margin-left:5px;" onclick="removeCustomSchemaProp('${id}', '${k}')">&times;</span>
-        </div>
-    `).join('');
+window.updateSchemaPreview = function(builderId) {
+    const preview = document.getElementById(`${builderId}-preview`);
+    if (!preview) return;
+    const data = collectSchemaData(builderId);
+    preview.textContent = JSON.stringify(data, null, 2);
 };
+
+window.collectSchemaData = function(builderId) {
+    const typeSelect = document.getElementById(`${builderId}-type`);
+    if (!typeSelect) return {};
+    const type = typeSelect.value;
+    const template = SCHEMA_TEMPLATES[type];
+    const formContainer = document.getElementById(`${builderId}-form`);
+    if (!template || !formContainer) return {};
+
+    const result = {
+        "@context": "https://schema.org",
+        "@type": type
+    };
+
+    collectFromTemplate(template, builderId, formContainer, result);
+    return cleanEmpty(result);
+};
+
+function collectFromTemplate(template, prefix, container, result) {
+    for (const key in template) {
+        if (key === '@context' || key === '@type') continue;
+        const val = template[key];
+        const fieldId = `${prefix}__${key}`;
+
+        if (Array.isArray(val)) {
+            if (val.length > 0 && typeof val[0] === 'object' && val[0] !== null) {
+                const itemsContainer = document.getElementById(`${fieldId}-items`);
+                if (!itemsContainer) continue;
+                const items = itemsContainer.querySelectorAll(':scope > .schema-array-item');
+                const arr = [];
+                items.forEach(item => {
+                    const obj = { "@type": val[0]["@type"] || key };
+                    collectFromTemplate(val[0], item.id, item, obj);
+                    arr.push(obj);
+                });
+                if (arr.length > 0) result[key] = arr;
+            } else {
+                const inputs = container.querySelectorAll(`input.schema-str-arr[data-field="${fieldId}"]`);
+                const arr = [];
+                inputs.forEach(inp => { if (inp.value.trim()) arr.push(inp.value.trim()); });
+                if (arr.length > 0) result[key] = arr;
+            }
+        } else if (typeof val === 'object' && val !== null) {
+            const obj = { "@type": val["@type"] || key };
+            collectFromTemplate(val, fieldId, container, obj);
+            if (Object.keys(obj).length > (val["@type"] ? 1 : 0)) result[key] = obj;
+        } else {
+            const input = container.querySelector(`input.schema-val[data-field="${fieldId}"]`);
+            if (input && input.value.trim()) {
+                result[key] = input.type === 'number' ? Number(input.value) : input.value.trim();
+            }
+        }
+    }
+}
+
+function cleanEmpty(obj) {
+    if (typeof obj !== 'object' || obj === null) return obj;
+    if (Array.isArray(obj)) {
+        return obj.map(cleanEmpty).filter(v => {
+            if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+                const keys = Object.keys(v).filter(k => k !== '@type');
+                return keys.length > 0;
+            }
+            return v !== '' && v !== null && v !== undefined;
+        });
+    }
+    const cleaned = {};
+    for (const k in obj) {
+        const v = cleanEmpty(obj[k]);
+        if (v === '' || v === null || v === undefined) continue;
+        if (typeof v === 'object' && !Array.isArray(v)) {
+            const keys = Object.keys(v).filter(key => key !== '@type');
+            if (keys.length === 0) continue;
+        }
+        if (Array.isArray(v) && v.length === 0) continue;
+        cleaned[k] = v;
+    }
+    return cleaned;
+}
 
 async function submitTool(id, endpoint) {
     const resBox = document.getElementById(`res-${id}`);
@@ -280,32 +416,16 @@ async function submitTool(id, endpoint) {
     
     const payload = {};
     try {
-        if(id === 'robots') {
+        if (id === 'robots') {
             payload.target_crawlers = JSON.parse(document.getElementById('r-crawlers').value || "[]");
             payload.allow_paths = JSON.parse(document.getElementById('r-allow').value || "[]");
             payload.urls_to_disallow = JSON.parse(document.getElementById('r-disallow').value || "[]");
-            payload.allowed_directories = payload.allow_paths; // Map properly to backend
+            payload.allowed_directories = payload.allow_paths;
         } else if (id === 'schema') {
             payload.schema_type = document.getElementById('s-builder-type').value;
-            payload.parameters = {};
-            
-            const parseVal = (v) => {
-                try { return JSON.parse(v); }
-                catch(e) { return v; }
-            };
-            
-            // Get standard props
-            document.querySelectorAll('#s-builder-props .schema-prop-input').forEach(inp => {
-                if (inp.value.trim()) {
-                    payload.parameters[inp.getAttribute('data-prop')] = parseVal(inp.value.trim());
-                }
-            });
-            
-            // Get custom props
-            const custom = JSON.parse(document.getElementById('s-builder-custom-json').value || "{}");
-            for (let k in custom) {
-                payload.parameters[k] = parseVal(custom[k]);
-            }
+            payload.parameters = collectSchemaData('s-builder');
+            delete payload.parameters['@context'];
+            delete payload.parameters['@type'];
         } else if (id === 'sitemap') {
             payload.urls = JSON.parse(document.getElementById('sm-urls').value || "[]");
         } else if (id === 'hreflang') {
@@ -356,7 +476,7 @@ async function submitTool(id, endpoint) {
         const data = await response.json();
         if(!response.ok) throw new Error(data.detail || 'Error running tool');
         
-        resBox.innerHTML = `<pre style="white-space:pre-wrap; word-wrap:break-word;">${JSON.stringify(data, null, 2)}</pre>`;
+        resBox.innerHTML = `<pre style="white-space:pre-wrap; word-wrap:break-word; color:#7ee787;">${JSON.stringify(data, null, 2)}</pre>`;
     } catch(err) {
         resBox.innerHTML = `<span class="text-danger">${err.message}</span>`;
     }
