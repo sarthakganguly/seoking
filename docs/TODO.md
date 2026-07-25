@@ -11,6 +11,21 @@ This file tracks proposed enhancements, optimizations, and technical debt items 
   *   **Description**: Allow users to specify up to 3 competitor domains (e.g. `competitor.com`) in Settings. Parse and record competitor rankings from the Google SERP HTML alongside the main domain.
   *   **Benefits**: Free competitor analysis using the same SERP HTML response without generating extra HTTP requests.
 
+- [x] **🤖 Robots.txt Creator Enhancements**
+  *   **Module**: Standalone Utility Tools (`app/tools.py`, `tools-registry.js`)
+  *   **Description**: Pre-populated default user-agents (`*`, `Googlebot`, `Googlebot-Image`, `Google-Extended`), Google Search Central quick preset shortcuts, and optional `Sitemap:` directive support.
+  *   **Benefits**: Ensures rules align directly with Google Search Central guidelines (`docs/gsearch.md`).
+
+- [x] **🗺️ XML Sitemap & Media Extension Crawler Builder**
+  *   **Module**: Standalone Utility Tools (`app/tools.py`, `tools-registry.js`)
+  *   **Description**: Automated domain crawling (`crawl_domain_for_sitemap`) for multi-URL page discovery, full support for Standard (0.9), Image, Video, and News extension XML namespaces, 50,000 URL threshold validation, and ephemeral in-memory Blob downloading.
+  *   **Benefits**: Eliminates manual URL typing and generates compliant, multi-extension sitemaps on demand.
+
+- [x] **🧩 Standalone Tools Architecture Decoupling**
+  *   **Module**: Frontend Architecture (`app/static/`)
+  *   **Description**: Decoupled monolithic `tools-hub.js` into a clean modular architecture (`tools-registry.js`, `tools-widgets.js`, `tools-schema-builder.js`, `tools-hub.js`) with a zero-switch declarative form serializer (`serializeToolForm`) and ephemeral Blob downloads.
+  *   **Benefits**: High maintainability, separation of concerns, and 100% configuration-driven tool additions.
+
 - [ ] **🍪 Persisted Browser Storage State (Stealth Layer)**
   *   **Module**: Stealth / Scraper Layer
   *   **Description**: Save the Playwright browser context storage state (cookies, local storage, consent configurations) to a local JSON file (e.g., `/app/data/session_state.json`) after a CAPTCHA is solved. Load this state when starting new scraper browser instances.
