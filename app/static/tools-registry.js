@@ -14,7 +14,31 @@ const TOOLS_REGISTRY = [
             { id: "r-crawlers", name: "target_crawlers", label: "Target Crawlers (User-Agents)", type: "list", defaultItems: ["*", "Googlebot", "Googlebot-Image", "Google-Extended"], presets: ["*", "Googlebot", "Googlebot-Image", "Googlebot-News", "Googlebot-Video", "Storebot-Google", "Google-Extended", "Bingbot", "GPTBot"], placeholder: "e.g., Googlebot" },
             { id: "r-allow", name: "allowed_directories", label: "Allow Paths", type: "list", placeholder: "e.g., /public/" },
             { id: "r-disallow", name: "urls_to_disallow", label: "Disallow Paths", type: "list", placeholder: "e.g., /admin/" },
-            { id: "r-sitemap", name: "sitemap_url", label: "Sitemap URL (Optional)", type: "text", placeholder: "https://example.com/sitemap.xml" }
+            { id: "r-sitemap", name: "sitemap_url", label: "Sitemap URL (Optional)", type: "url", placeholder: "example.com/sitemap.xml" }
+        ] 
+    },
+    { 
+        id: "robotstester", 
+        name: "Robots.txt Rule & Path Tester", 
+        desc: "Tests specific URL paths against robots.txt rules to verify ALLOWED vs BLOCKED status based on Google Search Central precedence rules.", 
+        action: "Test Path Rule", 
+        endpoint: "/api/tools/robots-path-tester", 
+        fields: [
+            { id: "rt-txt", name: "robots_txt", label: "Robots.txt Content", type: "textarea", placeholder: "User-agent: *\nDisallow: /admin/\nAllow: /admin/public/" },
+            { id: "rt-path", name: "test_path", label: "URL Path to Test", type: "text", placeholder: "/admin/public/page" },
+            { 
+                id: "rt-ua", 
+                name: "user_agent", 
+                label: "Target User-Agent Crawler", 
+                type: "select", 
+                options: [
+                    { value: "Googlebot", label: "Googlebot (Search)" },
+                    { value: "Googlebot-Image", label: "Googlebot-Image" },
+                    { value: "Google-Extended", label: "Google-Extended (AI)" },
+                    { value: "Bingbot", label: "Bingbot" },
+                    { value: "*", label: "* (All Bots)" }
+                ] 
+            }
         ] 
     },
     { 
@@ -122,7 +146,7 @@ const TOOLS_REGISTRY = [
         desc: "Trace 301/302 redirect hops.", 
         action: "Trace", 
         endpoint: "/api/tools/redirect-tracer", 
-        fields: [{ id: "rd-url", name: "url", label: "Target URL", type: "text" }] 
+        fields: [{ id: "rd-url", name: "url", label: "Target URL", type: "url" }] 
     },
     { 
         id: "eeat", 
@@ -153,12 +177,20 @@ const TOOLS_REGISTRY = [
         }] 
     },
     { 
+        id: "eeatscanner", 
+        name: "E-E-A-T Live Page Scanner", 
+        desc: "Audits live HTML and metadata for E-E-A-T expertise signals, publish dates, outbound citations, and organizational trust pages.", 
+        action: "Scan Live Page E-E-A-T", 
+        endpoint: "/api/tools/eeat-page-scanner", 
+        fields: [{ id: "es-url", name: "url", label: "Target Webpage URL", type: "url", placeholder: "example.com/blog/article" }] 
+    },
+    { 
         id: "discover", 
-        name: "Google Discover Validator", 
-        desc: "Check Discover image & meta tags.", 
-        action: "Validate", 
+        name: "Google Discover Validator & Meta Builder", 
+        desc: "Audits pages for Google Discover eligibility according to Google Search Central. Validates hero image requirements (min 1200px width) and required meta tags (max-image-preview:large, og:image, og:image:width, og:image:height).", 
+        action: "Validate & Generate Meta Tags", 
         endpoint: "/api/tools/discover-validator", 
-        fields: [{ id: "d-url", name: "url", label: "Target URL", type: "text" }] 
+        fields: [{ id: "d-url", name: "url", label: "Target Article URL", type: "url", placeholder: "example.com/article" }] 
     },
     { 
         id: "safesearch", 
@@ -174,7 +206,7 @@ const TOOLS_REGISTRY = [
         desc: "Audit URL path cleanliness.", 
         action: "Audit", 
         endpoint: "/api/tools/url-auditor", 
-        fields: [{ id: "ua-domain", name: "domain", label: "Domain to audit", type: "text" }] 
+        fields: [{ id: "ua-domain", name: "domain", label: "Domain to audit", type: "url" }] 
     },
     { 
         id: "gsc", 
@@ -183,7 +215,7 @@ const TOOLS_REGISTRY = [
         action: "Diagnose", 
         endpoint: "/api/tools/gsc-diagnoser", 
         fields: [
-            { id: "gsc-prop", name: "property", label: "GSC Property", type: "text", placeholder: "https://example.com" },
+            { id: "gsc-prop", name: "property", label: "GSC Property", type: "url", placeholder: "https://example.com" },
             { id: "gsc-dates", name: "dates", label: "Date Range", type: "text", placeholder: "YYYY-MM-DD to YYYY-MM-DD" }
         ] 
     },
@@ -193,7 +225,7 @@ const TOOLS_REGISTRY = [
         desc: "Compare URL date vs Meta date.", 
         action: "Check", 
         endpoint: "/api/tools/date-consistency", 
-        fields: [{ id: "dc-url", name: "url", label: "Target URL", type: "text" }] 
+        fields: [{ id: "dc-url", name: "url", label: "Target URL", type: "url" }] 
     },
     { 
         id: "spadiff", 
@@ -201,7 +233,7 @@ const TOOLS_REGISTRY = [
         desc: "Compare Raw HTML vs JS render.", 
         action: "Analyze", 
         endpoint: "/api/tools/spa-lazy-load", 
-        fields: [{ id: "spa-url", name: "url", label: "Target URL", type: "text" }] 
+        fields: [{ id: "spa-url", name: "url", label: "Target URL", type: "url" }] 
     },
     { 
         id: "pdfaccess", 
@@ -209,7 +241,7 @@ const TOOLS_REGISTRY = [
         desc: "Check X-Robots-Tag for PDFs.", 
         action: "Check", 
         endpoint: "/api/tools/non-html-accessibility", 
-        fields: [{ id: "pdf-url", name: "url", label: "PDF URL", type: "text" }] 
+        fields: [{ id: "pdf-url", name: "url", label: "PDF URL", type: "url" }] 
     },
     { 
         id: "review", 
@@ -217,7 +249,7 @@ const TOOLS_REGISTRY = [
         desc: "Grade affiliate review pages.", 
         action: "Grade", 
         endpoint: "/api/tools/product-review-grader", 
-        fields: [{ id: "pr-url", name: "url", label: "Target URL", type: "text" }] 
+        fields: [{ id: "pr-url", name: "url", label: "Target URL", type: "url" }] 
     },
     { 
         id: "paywall", 
@@ -225,7 +257,7 @@ const TOOLS_REGISTRY = [
         desc: "Verify isAccessibleForFree schema.", 
         action: "Verify", 
         endpoint: "/api/tools/paywall-auditor", 
-        fields: [{ id: "pw-url", name: "url", label: "Target URL", type: "text" }] 
+        fields: [{ id: "pw-url", name: "url", label: "Target URL", type: "url" }] 
     },
     { 
         id: "snippet", 
@@ -233,7 +265,7 @@ const TOOLS_REGISTRY = [
         desc: "Scan max-snippet robot tags.", 
         action: "Scan", 
         endpoint: "/api/tools/snippet-scanner", 
-        fields: [{ id: "sn-url", name: "url", label: "Target URL", type: "text" }] 
+        fields: [{ id: "sn-url", name: "url", label: "Target URL", type: "url" }] 
     },
     { 
         id: "server", 
@@ -241,7 +273,7 @@ const TOOLS_REGISTRY = [
         desc: "Validate 503 Retry-After headers.", 
         action: "Validate", 
         endpoint: "/api/tools/server-maintenance", 
-        fields: [{ id: "sm-domain", name: "domain", label: "Target Domain", type: "text" }] 
+        fields: [{ id: "sm-domain", name: "domain", label: "Target Domain", type: "url" }] 
     },
     { 
         id: "indexing", 
@@ -258,7 +290,7 @@ const TOOLS_REGISTRY = [
         action: "Audit", 
         endpoint: "/api/tools/local-seo-auditor", 
         fields: [
-            { id: "ls-url", name: "url", label: "URL", type: "text" },
+            { id: "ls-url", name: "url", label: "URL", type: "url" },
             { id: "ls-name", name: "name", label: "Business Name", type: "text" },
             { id: "ls-address", name: "address", label: "Address", type: "text" },
             { id: "ls-phone", name: "phone", label: "Phone", type: "text" }
@@ -298,6 +330,14 @@ window.serializeToolForm = function(tool) {
                 answers[q] = chk ? chk.checked : false;
             });
             payload[key] = answers;
+        } else if (f.type === 'url') {
+            const protoEl = document.getElementById(`${f.id}-protocol`);
+            if (el && el.value.trim()) {
+                const proto = protoEl ? protoEl.value : "";
+                let val = el.value.trim();
+                val = val.replace(/^https?:\/\//, '');
+                payload[key] = proto + val;
+            }
         } else if (el) {
             const val = el.value.trim();
             if (val) payload[key] = val;

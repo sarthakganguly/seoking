@@ -20,11 +20,15 @@ DB_PATH = os.environ.get("DATABASE_URL", "/app/data/seoking.db")
 def get_db_connection():
     """
     Returns a sqlite3 connection with Row factory configured.
-    Enforces foreign keys on connection.
+    Enforces foreign keys, WAL journal mode, busy timeouts, and synchronous optimization 
+    to handle heavy concurrent writes during multi-tab crawling without database lock conflicts.
     """
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA busy_timeout = 30000;")
+    conn.execute("PRAGMA synchronous = NORMAL;")
     return conn
 
 def init_db():

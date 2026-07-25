@@ -98,6 +98,17 @@ function renderSingleTool(id) {
                 </div>
              `;
              setTimeout(() => renderSchemaForm(f.id), 0);
+        } else if (f.type === 'url') {
+            group.innerHTML += `
+                <div style="display:flex; border: 1px solid #333; border-radius: 6px; overflow: hidden;">
+                    <select id="${f.id}-protocol" style="background: #111; color: #fff; border: none; padding: 0 10px; outline: none; border-right: 1px solid #333; width: auto; font-family: inherit;">
+                        <option value="https://">https://</option>
+                        <option value="http://">http://</option>
+                        <option value="">(none)</option>
+                    </select>
+                    <input type="text" id="${f.id}" placeholder="${(f.placeholder || 'example.com').replace(/^https?:\/\//, '')}" class="tool-input" style="flex:1; border: none; border-radius: 0; outline: none; box-shadow: none;">
+                </div>
+            `;
         } else {
             group.innerHTML += `<input type="${f.type}" id="${f.id}" placeholder="${f.placeholder || ''}" class="tool-input">`;
         }
@@ -153,9 +164,38 @@ async function submitTool(id, endpoint) {
         if (!res.ok) throw new Error(data.detail || 'Tool execution failed');
 
         let html = '';
+        
+        if (data.what_this_tool_does) {
+            html += `
+                <div style="margin-bottom:12px; padding:12px 14px; background:#161b22; border-left:4px solid #38d9a9; border:1px solid #30363d; border-left-color:#38d9a9; border-radius:6px; font-size:0.88em; color:#c9d1d9; line-height:1.5;">
+                    <strong style="color:#38d9a9; display:block; margin-bottom:4px;">ℹ️ Operational Purpose:</strong>
+                    ${escapeHTML(data.what_this_tool_does)}
+                </div>
+            `;
+        }
+
+        if (data.audit_checks && Array.isArray(data.audit_checks)) {
+            html += `
+                <div style="margin-bottom:12px; border:1px solid #30363d; border-radius:6px; overflow:hidden;">
+                    <div style="background:#161b22; padding:8px 12px; border-bottom:1px solid #30363d; font-size:0.85em; font-weight:600; color:#8b949e;">Technical Compliance Checks</div>
+                    <table class="table" style="margin:0; font-size:0.85em;">
+                        <tbody>
+                            ${data.audit_checks.map(c => `
+                                <tr>
+                                    <td style="width:30px; text-align:center;">${c.passed ? '<span style="color:#38d9a9;">✓</span>' : '<span style="color:#f85149;">✗</span>'}</td>
+                                    <td><strong>${escapeHTML(c.requirement)}</strong></td>
+                                    <td style="color:var(--text-muted);">${escapeHTML(c.details)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
         const rawContent = data.xml || data.content;
-        const filename = data.filename || (data.xml ? 'sitemap.xml' : 'robots.txt');
-        const mimeType = data.xml ? 'application/xml' : 'text/plain';
+        const filename = data.filename || (data.xml ? 'sitemap.xml' : 'discover_meta_tags.html');
+        const mimeType = data.xml ? 'application/xml' : 'text/html';
 
         if (rawContent) {
             window[`_ephemeral_content_${id}`] = rawContent;
@@ -165,7 +205,7 @@ async function submitTool(id, endpoint) {
             html += `
                 <div style="margin-bottom:12px; padding:12px; background:#161b22; border:1px solid #30363d; border-radius:6px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
                     <div>
-                        <strong style="color:#38d9a9;">✓ ${escapeHTML(data.message || 'Output Generated')}</strong>
+                        <strong style="color:${data.is_eligible === false ? '#f85149' : '#38d9a9'};">✓ ${escapeHTML(data.status || data.message || 'Output Generated')}</strong>
                         <div style="font-size:0.85em; color:var(--text-muted); margin-top:2px;">Ephemeral in-memory build ${data.total_urls !== undefined ? '(' + data.total_urls + ' URLs discovered)' : ''}</div>
                     </div>
                     <button type="button" class="btn btn-sm btn-primary" onclick="triggerEphemeralDownload(window['_ephemeral_content_${id}'], window['_ephemeral_filename_${id}'], window['_ephemeral_mime_${id}'])">Download ${escapeHTML(filename)}</button>

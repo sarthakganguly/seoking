@@ -889,9 +889,9 @@ function renderOverviewTopIssues() {
     if (!listEl) return;
     
     let list = [];
-    Object.values(groupedIssues.errors).forEach(iss => list.push({ ...iss, type: "error" }));
-    Object.values(groupedIssues.warnings).forEach(iss => list.push({ ...iss, type: "warning" }));
-    Object.values(groupedIssues.notices).forEach(iss => list.push({ ...iss, type: "notice" }));
+    Object.values(groupedIssues.errors).forEach(iss => list.push({ ...iss, type: "error", sev: "errors" }));
+    Object.values(groupedIssues.warnings).forEach(iss => list.push({ ...iss, type: "warning", sev: "warnings" }));
+    Object.values(groupedIssues.notices).forEach(iss => list.push({ ...iss, type: "notice", sev: "notices" }));
     
     list.sort((a, b) => b.pages.length - a.pages.length);
     
@@ -901,7 +901,7 @@ function renderOverviewTopIssues() {
     }
     
     listEl.innerHTML = list.slice(0, 5).map(iss => `
-        <li class="top-issue-item ${iss.type}" onclick="switchAuditTab('issues'); showSingleIssueDetails('${iss.type}', '${escapeHtml(iss.name)}')">
+        <li class="top-issue-item ${iss.type}" onclick="switchAuditTab('issues'); showSingleIssueDetails('${iss.sev}', '${escapeHtml(iss.name)}')">
             <span class="issue-name">${escapeHtml(iss.name)}</span>
             <span class="issue-count">${iss.pages.length} pages</span>
         </li>
