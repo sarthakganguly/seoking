@@ -126,14 +126,6 @@
                     <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>
                     Site Audit
                 </a>
-                <a href="#" class="menu-item" data-target="performance">
-                    <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    Performance Audit
-                </a>
-                <a href="#" class="menu-item" data-target="optimizer">
-                    <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
-                    Content Optimizer
-                </a>
                 <a href="#" class="menu-item" data-target="tracker">
                     <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                     Rank Tracker
@@ -176,6 +168,15 @@
                         <span class="dot"></span>
                         <span class="text">Disconnected</span>
                     </div>
+                    <!-- Global Audience Lens Toggle -->
+                    <div class="lens-toggle-container">
+                        <label for="global-lens-select" class="sr-only">Select Audience Lens</label>
+                        <select id="global-lens-select" class="lens-select" aria-label="Select Audience Lens">
+                            <option value="non-technical" selected>Non-Technical</option>
+                            <option value="seo-manager">SEO Manager</option>
+                            <option value="developer">Developer</option>
+                        </select>
+                    </div>
                     <!-- Theme Toggle -->
                     <button id="theme-toggle-btn" class="btn-icon" title="Toggle Theme">
                         <svg class="sun-icon hidden" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -206,9 +207,17 @@
                             <span class="metric-title">Audit Pages Crawled</span>
                             <span class="metric-value" id="dash-pages-crawled">0</span>
                         </div>
-                        <div class="metric-card">
-                            <span class="metric-title">Crawled Health</span>
-                            <span class="metric-value text-success" id="dash-site-health">--</span>
+                    </div>
+
+                    <div class="card card-wide risk-ledger-container" style="margin-bottom: 20px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h2>Risk Ledger</h2>
+                            <span class="badge badge-secondary" id="ledger-last-run">No recent audits</span>
+                        </div>
+                        <p class="text-muted" style="margin-bottom: 20px;">Prioritized breakdown of findings across all audit chapters.</p>
+                        
+                        <div id="risk-ledger-content">
+                            <div class="empty-state">Run a Site Audit to populate the Risk Ledger.</div>
                         </div>
                     </div>
 
@@ -491,43 +500,7 @@
                                     <div class="issues-list-wrapper" id="issues-accordion-container"></div>
                                 </div>
                                 
-                                <!-- Individual Issue Detail View (Hidden by default) -->
-                                <div id="single-issue-detail-view" class="hidden">
-                                    <div class="issue-detail-header-row">
-                                        <button class="btn btn-sm btn-secondary" onclick="goBackToIssuesList()">← All issues</button>
-                                        <div class="issue-title-bar">
-                                            <h3 id="single-issue-title">Issue Name</h3>
-                                            <span class="badge" id="single-issue-severity-badge">error</span>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="issue-diagnostic-summary">
-                                        <div class="failed-count-status">
-                                            Failed: <strong class="text-danger" id="single-issue-failed-count">0</strong>
-                                            Successful: <strong class="text-success" id="single-issue-success-count">0</strong>
-                                            <div class="failed-progress-bar">
-                                                <div class="bar-fill" id="single-issue-progress-fill" style="width: 0%"></div>
-                                            </div>
-                                        </div>
-                                        <div class="how-to-fix-box">
-                                            <strong>How to fix:</strong>
-                                            <p id="single-issue-how-to-fix">Fix details...</p>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="table-container">
-                                        <table id="single-issue-pages-table">
-                                            <thead>
-                                                <tr>
-                                                    <th>Page URL</th>
-                                                    <th>Status Code</th>
-                                                    <th>Actions</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody></tbody>
-                                        </table>
-                                    </div>
-                                </div>
+
                             </div>
                             
                             <!-- 3. CRAWLED PAGES PANEL -->
@@ -1296,17 +1269,28 @@
 
     <!-- CAPTCHA Resolution Overlay (VNC iframe) -->
     <div id="captcha-modal" class="modal hidden no-dismiss">
-        <div class="modal-content modal-vnc">
-            <div class="modal-header">
-                <h2>Google Security CAPTCHA Detected!</h2>
-                <span class="warning-text">Google block triggered. Please solve the captcha puzzle inside the browser frame below to resume scraping.</span>
+        <div class="modal-content vnc-captcha-panel">
+            <div class="vnc-banner">
+                <div class="vnc-banner-icon">⚠️</div>
+                <div class="vnc-banner-text">
+                    <h3>Manual Intervention Required</h3>
+                    <p>Search engine anti-bot protection triggered. Please solve the challenge below to resume the automated audit.</p>
+                </div>
             </div>
-            <div class="vnc-frame-container">
-                <iframe id="vnc-iframe" src=""></iframe>
+            <div class="vnc-frame-wrapper">
+                <div class="vnc-frame-header">
+                    <span class="vnc-status-indicator pulse-active">Live Browser Session</span>
+                    <span class="vnc-session-id">Secure Connection</span>
+                </div>
+                <div class="vnc-frame-container">
+                    <iframe id="vnc-iframe" src="" title="Live Browser Session for CAPTCHA Resolution"></iframe>
+                </div>
             </div>
-            <div class="modal-footer">
-                <p>The system will automatically detect when you solve it and navigate away. Or, click below if you have successfully resolved the block.</p>
-                <button class="btn btn-primary" onclick="forceResolveCaptcha()">I Have Solved It</button>
+            <div class="vnc-footer">
+                <div class="vnc-footer-status" aria-live="polite">
+                    The audit will automatically resume once the challenge is solved.
+                </div>
+                <button class="btn btn-primary" onclick="forceResolveCaptcha()">Force Resume</button>
             </div>
         </div>
     </div>

@@ -16,7 +16,7 @@ async def run_performance_audit_job(run_id: int, url: str, strategy: str):
     logger.info(f"Starting performance audit for {url} using strategy {strategy} (run_id: {run_id})")
     
     # Update status to running
-    update_audit_status(run_id, "running")
+    await update_audit_status(run_id, "running")
     
     try:
         # Determine browser profile
@@ -291,7 +291,7 @@ async def run_performance_audit_job(run_id: int, url: str, strategy: str):
             await browser.close()
             
             # Save results to database
-            save_audit_results(
+            await save_audit_results(
                 run_id, 
                 status="completed", 
                 lcp=round(lcp, 2), 
@@ -305,24 +305,24 @@ async def run_performance_audit_job(run_id: int, url: str, strategy: str):
             
     except Exception as e:
         logger.error(f"Error executing performance audit: {e}")
-        update_audit_status(run_id, "failed")
+        await update_audit_status(run_id, "failed")
 
-def update_audit_status(run_id: int, status: str):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def update_audit_status(run_id: int, status: str):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute("UPDATE performance_audits SET status = ? WHERE id = ?", (status, run_id))
-        conn.commit()
+        await cursor.execute("UPDATE performance_audits SET status = ? WHERE id = ?", (status, run_id))
+        await conn.commit()
     except Exception as e:
         logger.error(f"Failed to update performance_audits status: {e}")
     finally:
-        conn.close()
+        await conn.close()
 
-def save_audit_results(run_id: int, status: str, lcp: float, inp: float, cls: float, ttfb: float, dom_size: int, details: dict):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def save_audit_results(run_id: int, status: str, lcp: float, inp: float, cls: float, ttfb: float, dom_size: int, details: dict):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute(
+        await cursor.execute(
             """
             UPDATE performance_audits 
             SET status = ?, lcp = ?, inp = ?, cls = ?, ttfb = ?, dom_size = ?, details_json = ?
@@ -330,8 +330,8 @@ def save_audit_results(run_id: int, status: str, lcp: float, inp: float, cls: fl
             """,
             (status, lcp, inp, cls, ttfb, dom_size, json.dumps(details), run_id)
         )
-        conn.commit()
+        await conn.commit()
     except Exception as e:
         logger.error(f"Failed to save performance_audits results: {e}")
     finally:
-        conn.close()
+        await conn.close()

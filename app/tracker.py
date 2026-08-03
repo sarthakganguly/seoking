@@ -81,22 +81,20 @@ async def check_keyword_rank(user_id: int, kw_id: int, keyword: str, target_doma
         
         # Step 2: Retrieve competitors
         competitors = []
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        conn = await get_db_connection()
+        cursor = await conn.cursor()
         try:
-            cursor.execute("SELECT competitors_json FROM tracked_keywords WHERE id = ?", (kw_id,))
-            row = cursor.fetchone()
+            await cursor.execute("SELECT competitors_json FROM tracked_keywords WHERE id = ?", (kw_id,))
+            row = await cursor.fetchone()
             if row and row["competitors_json"]:
                 try:
                     competitors = json.loads(row["competitors_json"])
-                    if not isinstance(competitors, list):
-                        competitors = []
-                except Exception:
-                    competitors = []
+                except json.JSONDecodeError:
+                    pass
         except Exception as e:
-            logger.error(f"Error reading competitors for keyword {kw_id}: {e}")
+            logger.error(f"Error retrieving competitors for {keyword}: {e}")
         finally:
-            conn.close()
+            await conn.close()
 
         # Step 3: Extract ranks
         res = extract_ranks(serp_html, target_domain, competitors)
@@ -105,24 +103,24 @@ async def check_keyword_rank(user_id: int, kw_id: int, keyword: str, target_doma
         competitor_ranks = res["competitors"]
         
         # Step 4: Write history to DB
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        conn = await get_db_connection()
+        cursor = await conn.cursor()
         try:
-            cursor.execute(
+            await cursor.execute(
                 """
                 INSERT INTO keyword_rank_history (tracked_keyword_id, rank_position, ranking_url, competitor_ranks_json)
                 VALUES (?, ?, ?, ?)
                 """,
                 (kw_id, rank_pos, ranking_url, json.dumps(competitor_ranks))
             )
-            conn.commit()
+            await conn.commit()
             logger.info(f"Saved rank history: Keyword='{keyword}', Rank={rank_pos}, CompetitorRanks={competitor_ranks}")
             return True
         except Exception as e:
             logger.error(f"Error saving rank history for {keyword}: {e}")
             return False
         finally:
-            conn.close()
+            await conn.close()
     except Exception as e:
         logger.error(f"Failed to check keyword '{keyword}': {e}")
         return False
@@ -138,11 +136,11 @@ async def run_scheduled_rank_tracker(user_id: int, force_check: bool = False):
     TRACKING_JOBS["active"] = True
     logger.info("Rank tracker job started.")
     
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
         # Fetch keywords
-        cursor.execute(
+        await cursor.execute(
             """
             SELECT id, keyword, target_domain, target_geolocation, target_locale 
             FROM tracked_keywords 
@@ -150,15 +148,17 @@ async def run_scheduled_rank_tracker(user_id: int, force_check: bool = False):
             """,
             (user_id,)
         )
-        keywords = cursor.fetchall()
+        keywords = await cursor.fetchall()
         
+        if not keywords:
+            logger.info("No tracked keywords found for rank tracker.")
+            return
+
         for kw in keywords:
             kw_id = kw["id"]
-            keyword = kw["keyword"]
-            domain = kw["target_domain"]
             
             # Check if updated in the last 20 hours (to allow daily run)
-            cursor.execute(
+            await cursor.execute(
                 """
                 SELECT checked_at FROM keyword_rank_history 
                 WHERE tracked_keyword_id = ? 
@@ -166,30 +166,32 @@ async def run_scheduled_rank_tracker(user_id: int, force_check: bool = False):
                 """,
                 (kw_id,)
             )
-            history = cursor.fetchone()
+            history = await cursor.fetchone()
             
-            should_check = force_check
-            if not should_check and history:
+            should_run = True
+            if history and history["checked_at"]:
                 last_checked = datetime.strptime(history["checked_at"], "%Y-%m-%d %H:%M:%S")
-                # If more than 20 hours ago, run it
-                if datetime.utcnow() - last_checked > timedelta(hours=20):
-                    should_check = True
-            elif not history:
-                should_check = True
+                hours_since = (datetime.utcnow() - last_checked).total_seconds() / 3600
+                if hours_since < 20:
+                    should_run = False
+            
+            if should_run:
+                # Add jitter delay between queries to avoid getting blocked
+                jitter_min = int(await get_user_setting(user_id, "jitter_min_ms", 3000))
+                jitter_max = int(await get_user_setting(user_id, "jitter_max_ms", 8000))
+                delay_s = random.uniform(jitter_min, jitter_max) / 1000.0
+                await asyncio.sleep(delay_s)
                 
-            if should_check:
-                # Run the check
-                success = await check_keyword_rank(user_id, kw_id, keyword, domain)
-                if success:
-                    # Apply humanized jitter to prevent getting blocked
-                    await apply_human_jitter(user_id)
-            else:
-                logger.info(f"Skipping keyword '{keyword}', checked recently.")
-                
+                await check_keyword_rank(
+                    user_id,
+                    kw_id, 
+                    kw["keyword"], 
+                    kw["target_domain"]
+                )
     except Exception as e:
-        logger.error(f"Error in scheduler rank tracker loop: {e}")
+        logger.error(f"Error in run_scheduled_rank_tracker: {e}")
     finally:
-        conn.close()
+        await conn.close()
         TRACKING_JOBS["active"] = False
         logger.info("Rank tracker job completed.")
 

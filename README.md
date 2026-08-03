@@ -9,7 +9,7 @@ SEO King is a locally hosted, zero-dependency, local-first search engine optimiz
 All design requirements, technical architecture definitions, and constraints are maintained under the [docs](file:///home/sarthakganguly/seoking/docs/) directory:
 
 - 📑 **[Product Requirements (PRD.md)](file:///home/sarthakganguly/seoking/docs/PRD.md)**: Details the functional goals of the system, hardware constraints (ThinkPad X230 optimization), stealth scraping specifications, VNC CAPTCHA interception logic, the 8 Core Platform Chapters, and the Standalone Utility Tools Suite.
-- 🗄️ **[Database Schema (SCHEMA.md)](file:///home/sarthakganguly/seoking/docs/SCHEMA.md)**: Holds the SQLite schema definitions optimizing performance for users, settings, sitemaps, page crawls, keyword definitions, and rank historical tables.
+- 🗄️ **[Database Schema (SCHEMA.md)](file:///home/sarthakganguly/seoking/docs/SCHEMA.md)**: Holds the SQLite (via aiosqlite) schema definitions optimizing performance for users, settings, sitemaps, page crawls, keyword definitions, and rank historical tables.
 - 🤖 **[Agent Instructions (agents.md)](file:///home/sarthakganguly/seoking/docs/agents.md)**: Lists strict architectural boundaries, workflow instructions, scraping configurations, and development requirements for Antigravity coding assistants.
 
 ---
@@ -19,7 +19,7 @@ All design requirements, technical architecture definitions, and constraints are
 SEO King is 100% containerized. The system coordinates the following layers under a single Docker network:
 1. **FastAPI Backend (port `8000`)**: Python web framework routing HTTP requests, serving static views, running background keyword check daemons, and hosting the WebSocket CAPTCHA broker.
 2. **Virtual Desktop (Xvfb & noVNC port `8081`)**: A lightweight virtual frame buffer display mapping Playwright Chromium automation. If a Google CAPTCHA security challenge is intercepted, the web interface embeds this stream via an `<iframe>` to allow manual clearance.
-3. **SQLite Database (persisted)**: A local database file mapped to the host's directory for robust data persistence between image rebuilds.
+3. **SQLite Database (persisted)**: A local database file mapped to the host's directory for robust data persistence between image rebuilds. Uses `aiosqlite` for asynchronous concurrency.
 
 ---
 
@@ -39,7 +39,7 @@ SEO King is 100% containerized. The system coordinates the following layers unde
 │   │   └── tools-hub.js       # Dynamic UI logic for Standalone Tools
 │   ├── auth.py                # Hashing and authentication
 │   ├── crawler.py             # Site auditor engine (Chapters 1–6)
-│   ├── database.py            # SQLite connection pool & query helpers
+│   ├── database.py            # Async SQLite connection pool & query helpers
 │   ├── main.py                # FastAPI routes & WebSocket server
 │   ├── optimizer.py           # spaCy NLP optimizer (Chapter 1.2 / Ephemeral content engine)
 │   ├── scraper.py             # Playwright stealth & CAPTCHA tracker (Stealth Layer)

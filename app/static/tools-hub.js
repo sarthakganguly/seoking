@@ -21,9 +21,15 @@ function initToolsHub() {
     });
 }
 
-function renderSingleTool(id) {
+function renderSingleTool(id, queryString = "") {
     const tool = TOOLS_REGISTRY.find(t => t.id === id);
     if (!tool) return;
+    
+    let prefillUrl = "";
+    if (queryString) {
+        const params = new URLSearchParams(queryString);
+        prefillUrl = params.get("url") || "";
+    }
     
     document.getElementById('single-tool-name').innerText = tool.name;
     document.getElementById('single-tool-desc').innerText = tool.desc;
@@ -40,8 +46,13 @@ function renderSingleTool(id) {
         group.className = 'form-group';
         group.innerHTML = `<label style="display:block; margin-bottom:5px; font-weight:600;">${f.label || ''}</label>`;
         
+        let prefillValue = "";
+        if (prefillUrl && (f.type === 'url' || f.type === 'text') && (f.name.includes('url') || f.name.includes('domain') || f.id.includes('url') || f.id.includes('target'))) {
+            prefillValue = prefillUrl;
+        }
+
         if (f.type === 'textarea') {
-            group.innerHTML += `<textarea id="${f.id}" class="tool-input" rows="4" placeholder="${f.placeholder || ''}"></textarea>`;
+            group.innerHTML += `<textarea id="${f.id}" class="tool-input" rows="4" placeholder="${f.placeholder || ''}">${escapeHtml(prefillValue)}</textarea>`;
         } else if (f.type === 'select') {
             const options = f.options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join('');
             group.innerHTML += `<select id="${f.id}" class="tool-input">${options}</select>`;
@@ -99,18 +110,23 @@ function renderSingleTool(id) {
              `;
              setTimeout(() => renderSchemaForm(f.id), 0);
         } else if (f.type === 'url') {
+            let protocol = "https://";
+            let val = prefillValue;
+            if (val.startsWith("http://")) { protocol = "http://"; val = val.substring(7); }
+            else if (val.startsWith("https://")) { protocol = "https://"; val = val.substring(8); }
+            
             group.innerHTML += `
                 <div style="display:flex; border: 1px solid #333; border-radius: 6px; overflow: hidden;">
                     <select id="${f.id}-protocol" style="background: #111; color: #fff; border: none; padding: 0 10px; outline: none; border-right: 1px solid #333; width: auto; font-family: inherit;">
-                        <option value="https://">https://</option>
-                        <option value="http://">http://</option>
+                        <option value="https://" ${protocol === "https://" ? "selected" : ""}>https://</option>
+                        <option value="http://" ${protocol === "http://" ? "selected" : ""}>http://</option>
                         <option value="">(none)</option>
                     </select>
-                    <input type="text" id="${f.id}" placeholder="${(f.placeholder || 'example.com').replace(/^https?:\/\//, '')}" class="tool-input" style="flex:1; border: none; border-radius: 0; outline: none; box-shadow: none;">
+                    <input type="text" id="${f.id}" placeholder="${(f.placeholder || 'example.com').replace(/^https?:\/\//, '')}" value="${escapeHtml(val)}" class="tool-input" style="flex:1; border: none; border-radius: 0; outline: none; box-shadow: none;">
                 </div>
             `;
         } else {
-            group.innerHTML += `<input type="${f.type}" id="${f.id}" placeholder="${f.placeholder || ''}" class="tool-input">`;
+            group.innerHTML += `<input type="${f.type}" id="${f.id}" placeholder="${f.placeholder || ''}" value="${escapeHtml(prefillValue)}" class="tool-input">`;
         }
         
         formDiv.appendChild(group);

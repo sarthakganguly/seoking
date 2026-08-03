@@ -30,10 +30,10 @@ async def get_browser_options(user_id: int) -> dict:
     Compiles Playwright browser context options from settings.
     """
     # Fetch settings from DB or use defaults
-    geo_lat = float(get_user_setting(user_id, "geolocation_latitude", "37.7749"))
-    geo_lon = float(get_user_setting(user_id, "geolocation_longitude", "-122.4194"))
-    locale = get_user_setting(user_id, "locale", "en-US")
-    timezone = get_user_setting(user_id, "timezone", "America/Los_Angeles")
+    geo_lat = float(await get_user_setting(user_id, "geolocation_latitude", "37.7749"))
+    geo_lon = float(await get_user_setting(user_id, "geolocation_longitude", "-122.4194"))
+    locale = await get_user_setting(user_id, "locale", "en-US")
+    timezone = await get_user_setting(user_id, "timezone", "America/Los_Angeles")
     
     # Random realistic User-Agent
     user_agents = [
@@ -58,8 +58,8 @@ async def apply_human_jitter(user_id: int):
     """
     Injects random sleep delay between automated actions (humanized jitter).
     """
-    jitter_min = int(get_user_setting(user_id, "jitter_min_ms", "3000"))
-    jitter_max = int(get_user_setting(user_id, "jitter_max_ms", "8000"))
+    jitter_min = int(await get_user_setting(user_id, "jitter_min_ms", "3000"))
+    jitter_max = int(await get_user_setting(user_id, "jitter_max_ms", "8000"))
     delay = random.randint(jitter_min, jitter_max) / 1000.0
     logger.info(f"Applying human jitter delay of {delay:.2f}s")
     await asyncio.sleep(delay)

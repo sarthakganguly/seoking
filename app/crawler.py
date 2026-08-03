@@ -15,9 +15,18 @@ from app.database import get_db_connection, get_user_setting
 
 logger = logging.getLogger("seoking.crawler")
 
-# Global dict to track active crawl tasks, allowing cancellation
-ACTIVE_CRAWLS = {}
-
+async def check_if_cancelled(run_id: int) -> bool:
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
+    try:
+        await cursor.execute("SELECT status FROM audit_runs WHERE id = ?", (run_id,))
+        row = await cursor.fetchone()
+        return row and row["status"] == "cancelled"
+    except Exception as e:
+        logger.error(f"Error checking cancel status for run_id {run_id}: {e}")
+        return False
+    finally:
+        await conn.close()
 def check_ssl(domain: str) -> dict:
     """
     Connects to domain via SSL port 443 and checks details.
@@ -124,7 +133,7 @@ def parse_urls_from_xml(xml_content: str) -> list[str]:
     return urls
 
 class AuditCrawler:
-    def __init__(self, user_id: int, run_id: int, domain: str, max_depth: int):
+    async def __init__(self, user_id: int, run_id: int, domain: str, max_depth: int):
         self.user_id = user_id
         self.run_id = run_id
         self.domain = domain
@@ -137,7 +146,7 @@ class AuditCrawler:
         self.sitemap_urls = set()
         
         # Concurrency limit from user settings
-        concurrency = int(get_user_setting(user_id, "max_concurrent_crawler_tabs", "3"))
+        concurrency = int(await get_user_setting(user_id, "max_concurrent_crawler_tabs", "3"))
         self.semaphore = asyncio.Semaphore(min(max(concurrency, 1), 5))
         
         # Run-wide checklist metadata
@@ -165,9 +174,9 @@ class AuditCrawler:
         
         while queue:
             # Check if this crawl run was canceled
-            if ACTIVE_CRAWLS.get(self.run_id) == "cancelled":
+            if await check_if_cancelled(self.run_id):
                 logger.info(f"Crawl run {self.run_id} cancelled by user.")
-                self.update_run_status("cancelled")
+                await self.update_run_status("cancelled")
                 return
 
             # Batch process based on concurrency limit
@@ -199,17 +208,17 @@ class AuditCrawler:
         # Step 4: Run post-crawl PageRank, SSL checks, and blocking audits
         await self.post_crawl_calculations()
 
-        self.update_run_status("completed")
+        await self.update_run_status("completed")
         logger.info(f"Crawl completed. Crawled {self.crawled_count} pages.")
 
-    def update_run_status(self, status: str):
+    async def update_run_status(self, status: str):
         """
         Updates the final status and completion time in the database.
         """
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        conn = await get_db_connection()
+        cursor = await conn.cursor()
         try:
-            cursor.execute(
+            await cursor.execute(
                 """
                 UPDATE audit_runs 
                 SET status = ?, total_urls_crawled = ?, completed_at = CURRENT_TIMESTAMP 
@@ -217,28 +226,28 @@ class AuditCrawler:
                 """,
                 (status, self.crawled_count, self.run_id)
             )
-            conn.commit()
+            await conn.commit()
         except Exception as e:
             logger.error(f"Failed to update audit_run status: {e}")
         finally:
-            conn.close()
+            await conn.close()
 
-    def save_run_details(self):
+    async def save_run_details(self):
         """
         Saves sitemap/robots/orphan metadata to SQLite.
         """
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        conn = await get_db_connection()
+        cursor = await conn.cursor()
         try:
-            cursor.execute(
+            await cursor.execute(
                 "UPDATE audit_runs SET details_json = ? WHERE id = ?",
                 (json.dumps(self.run_details), self.run_id)
             )
-            conn.commit()
+            await conn.commit()
         except Exception as e:
             logger.error(f"Failed to save audit_run details: {e}")
         finally:
-            conn.close()
+            await conn.close()
 
     async def audit_robots_and_sitemaps(self):
         """
@@ -303,7 +312,7 @@ class AuditCrawler:
                 logger.warning(f"Failed to fetch XML sitemap at {s_url}: {e}")
                 
         self.run_details["sitemap_urls_count"] = len(self.sitemap_urls)
-        self.save_run_details()
+        await self.save_run_details()
 
     async def check_orphan_pages(self):
         """
@@ -329,7 +338,7 @@ class AuditCrawler:
                 pass
                 
         self.run_details["orphan_pages"] = orphans
-        self.save_run_details()
+        await self.save_run_details()
 
     async def post_crawl_calculations(self):
         """
@@ -343,11 +352,11 @@ class AuditCrawler:
         self.run_details["ssl_details"] = ssl_details
         
         # 2. Fetch all pages crawled for this run
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        conn = await get_db_connection()
+        cursor = await conn.cursor()
         try:
-            cursor.execute("SELECT id, url, details_json, issues_json FROM audit_pages WHERE audit_run_id = ?", (self.run_id,))
-            rows = cursor.fetchall()
+            await cursor.execute("SELECT id, url, details_json, issues_json FROM audit_pages WHERE audit_run_id = ?", (self.run_id,))
+            rows = await cursor.fetchall()
             pages = []
             for r in rows:
                 p_id = r["id"]
@@ -442,7 +451,7 @@ class AuditCrawler:
                     p["issues"].append("Blocked from crawling by AI agents")
                 
                 # Save page changes
-                cursor.execute(
+                await cursor.execute(
                     "UPDATE audit_pages SET issues_json = ?, details_json = ? WHERE id = ?",
                     (json.dumps(p["issues"]), json.dumps(p["details"]), p["id"])
                 )
@@ -454,14 +463,14 @@ class AuditCrawler:
             self.run_details["ai_blocked_counts"] = ai_blocked_counts
             self.run_details["ssl_details"] = ssl_details
             
-            conn.commit()
+            await conn.commit()
         except Exception as e:
             logger.error(f"Error in post-crawl calculations: {e}")
         finally:
-            conn.close()
+            await conn.close()
 
     @staticmethod
-    def analyze_page_seo(url: str, status_code: int, response_headers: dict, html_content: bytes) -> dict:
+    async def analyze_page_seo(url: str, status_code: int, response_headers: dict, html_content: bytes) -> dict:
         """
         Parses HTML and executes 16 rigorous technical SEO checklists.
         """
@@ -883,10 +892,10 @@ class AuditCrawler:
 
             # Save to SQLite Database
             self.crawled_count += 1
-            conn = get_db_connection()
-            cursor = conn.cursor()
+            conn = await get_db_connection()
+            cursor = await conn.cursor()
             try:
-                cursor.execute(
+                await cursor.execute(
                     """
                     INSERT INTO audit_pages (
                         audit_run_id, url, status_code, title_tag, meta_description, 
@@ -902,15 +911,15 @@ class AuditCrawler:
                     )
                 )
                 
-                cursor.execute(
+                await cursor.execute(
                     "UPDATE audit_runs SET total_urls_crawled = ? WHERE id = ?",
                     (self.crawled_count, self.run_id)
                 )
-                conn.commit()
+                await conn.commit()
             except Exception as e:
                 logger.error(f"Error saving audit results for {url}: {e}")
             finally:
-                conn.close()
+                await conn.close()
 
             return discovered_links, depth
 
@@ -918,25 +927,24 @@ async def start_crawl_job(user_id: int, domain: str, max_depth: int) -> int:
     """
     Spawns an asynchronous site audit job.
     """
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     run_id = None
     try:
-        cursor.execute(
+        await cursor.execute(
             "INSERT INTO audit_runs (user_id, domain, status) VALUES (?, ?, 'running')",
             (user_id, domain)
         )
-        conn.commit()
+        await conn.commit()
         run_id = cursor.lastrowid
     except Exception as e:
         logger.error(f"Failed to create audit run: {e}")
         return None
     finally:
-        conn.close()
+        await conn.close()
 
     if run_id:
         crawler = AuditCrawler(user_id, run_id, domain, max_depth)
-        ACTIVE_CRAWLS[run_id] = "running"
         asyncio.create_task(run_crawler_task(run_id, crawler))
     
     return run_id
@@ -946,7 +954,4 @@ async def run_crawler_task(run_id: int, crawler: AuditCrawler):
         await crawler.run()
     except Exception as e:
         logger.error(f"Exception in crawler thread: {e}")
-        crawler.update_run_status("failed")
-    finally:
-        if run_id in ACTIVE_CRAWLS:
-            del ACTIVE_CRAWLS[run_id]
+        await crawler.update_run_status("failed")

@@ -10,10 +10,10 @@ from pydantic import BaseModel
 from app.database import init_db, get_db_connection, get_user_setting, set_user_setting
 from app.auth import (
     register_user, authenticate_user, recover_account, 
-    create_session, get_user_from_session, delete_session, ACTIVE_SESSIONS, get_current_user
+    create_session, get_user_from_session, delete_session, get_current_user
 )
 import app.scraper as scraper
-from app.crawler import start_crawl_job, ACTIVE_CRAWLS
+from app.crawler import start_crawl_job
 from app.optimizer import optimize_keyword_content
 from app.tracker import run_scheduled_rank_tracker, start_background_tracker
 from app.performance import run_performance_audit_job
@@ -30,7 +30,7 @@ CONNECTED_WEBSOCKETS = set()
 # Initialize DB on startup and launch background Rank Tracker daemon
 @app.on_event("startup")
 async def startup_event():
-    init_db()
+    await init_db()
     # Configure scraper callback to broadcast CAPTCHA triggers
     scraper.async_broadcast_callback = broadcast_ws_message
     
@@ -94,77 +94,78 @@ class PerformanceStartReq(BaseModel):
 # ----------------- AUTHENTICATION API -----------------
 
 @app.get("/api/init")
-def get_init_status():
+async def get_init_status():
     """
     Checks if a user is registered. Helps frontend decide whether to show registration.
     """
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute("SELECT id FROM users LIMIT 1")
-        row = cursor.fetchone()
+        await cursor.execute("SELECT id FROM users LIMIT 1")
+        row = await cursor.fetchone()
         return {"registered": row is not None}
     finally:
-        conn.close()
+        await conn.close()
 
 @app.post("/api/register")
-def api_register(data: RegisterReq):
-    recovery_code, err = register_user(data.username, data.password)
+async def api_register(data: RegisterReq):
+    recovery_code, err = await register_user(data.username, data.password)
     if err:
         raise HTTPException(status_code=400, detail=err)
     return {"recovery_code": recovery_code}
 
 @app.post("/api/login")
-def api_login(data: LoginReq, response: Response):
-    user_id, err = authenticate_user(data.username, data.password)
+async def api_login(data: LoginReq, response: Response):
+    user_id, err = await authenticate_user(data.username, data.password)
     if err:
         raise HTTPException(status_code=401, detail=err)
     
-    session_token = create_session(user_id)
-    # Set HTTP-only secure-ish cookie (samesite lax for local usage)
+    session_token = await create_session(user_id)
+    # Set HTTP-only secure cookie (samesite lax for local usage)
     response.set_cookie(
         key="session_token",
         value=session_token,
         httponly=True,
+        secure=True,
         samesite="lax",
         max_age=3600 * 24 * 7  # 7 days
     )
     return {"message": "Login successful"}
 
 @app.post("/api/recover")
-def api_recover(data: RecoverReq):
-    success = recover_account(data.username, data.recovery_code, data.new_password)
+async def api_recover(data: RecoverReq):
+    success = await recover_account(data.username, data.recovery_code, data.new_password)
     if not success:
         raise HTTPException(status_code=400, detail="Invalid recovery code or username.")
     return {"message": "Password reset successful"}
 
 @app.post("/api/logout")
-def api_logout(response: Response, session_token: str = Cookie(None)):
+async def api_logout(response: Response, session_token: str = Cookie(None)):
     if session_token:
-        delete_session(session_token)
+        await delete_session(session_token)
     response.delete_cookie("session_token")
     return {"message": "Logged out successfully"}
 
 @app.get("/api/me")
-def api_me(user_id: int = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def api_me(user_id: int = Depends(get_current_user)):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute("SELECT username, created_at FROM users WHERE id = ?", (user_id,))
-        row = cursor.fetchone()
+        await cursor.execute("SELECT username, created_at FROM users WHERE id = ?", (user_id,))
+        row = await cursor.fetchone()
         return {"id": user_id, "username": row["username"], "created_at": row["created_at"]}
     finally:
-        conn.close()
+        await conn.close()
 
 # ----------------- SETTINGS API -----------------
 
 @app.get("/api/settings")
-def api_get_settings(user_id: int = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def api_get_settings(user_id: int = Depends(get_current_user)):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute("SELECT setting_key, setting_value FROM user_settings WHERE user_id = ?", (user_id,))
-        rows = cursor.fetchall()
+        await cursor.execute("SELECT setting_key, setting_value FROM user_settings WHERE user_id = ?", (user_id,))
+        rows = await cursor.fetchall()
         settings_dict = {row["setting_key"]: row["setting_value"] for row in rows}
         
         # Inject defaults if missing
@@ -185,13 +186,13 @@ def api_get_settings(user_id: int = Depends(get_current_user)):
                 settings_dict[k] = v
         return settings_dict
     finally:
-        conn.close()
+        await conn.close()
 
 @app.post("/api/settings")
-def api_save_settings(data: SettingsReq, user_id: int = Depends(get_current_user)):
+async def api_save_settings(data: SettingsReq, user_id: int = Depends(get_current_user)):
     try:
         for k, v in data.settings.items():
-            set_user_setting(user_id, k, str(v))
+            await set_user_setting(user_id, k, str(v))
         return {"message": "Settings saved successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -206,11 +207,11 @@ async def api_start_audit(data: AuditStartReq, user_id: int = Depends(get_curren
     return {"run_id": run_id, "status": "running"}
 
 @app.get("/api/audit/runs")
-def api_get_audit_runs(user_id: int = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def api_get_audit_runs(user_id: int = Depends(get_current_user)):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute(
+        await cursor.execute(
             """
             SELECT id, domain, status, total_urls_crawled, started_at, completed_at 
             FROM audit_runs 
@@ -219,13 +220,13 @@ def api_get_audit_runs(user_id: int = Depends(get_current_user)):
             """,
             (user_id,)
         )
-        rows = cursor.fetchall()
+        rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        conn.close()
+        await conn.close()
 
 @app.get("/api/audit/run/{run_id}")
-def api_get_audit_details(
+async def api_get_audit_details(
     run_id: int, 
     page: int = 1, 
     limit: int = 100, 
@@ -233,16 +234,16 @@ def api_get_audit_details(
     filter_type: str = "all",
     user_id: int = Depends(get_current_user)
 ):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute("SELECT * FROM audit_runs WHERE id = ? AND user_id = ?", (run_id, user_id))
-        run = cursor.fetchone()
+        await cursor.execute("SELECT * FROM audit_runs WHERE id = ? AND user_id = ?", (run_id, user_id))
+        run = await cursor.fetchone()
         if not run:
             raise HTTPException(status_code=404, detail="Audit run not found.")
             
         # Get limit from database settings if not explicitly smaller
-        db_limit = int(get_user_setting(user_id, "audit_pagination_limit", "100"))
+        db_limit = int(await get_user_setting(user_id, "audit_pagination_limit", "100"))
         limit = min(max(limit, 1), db_limit, 100) # Maximum and default is 100
         
         # Build query filters
@@ -266,8 +267,8 @@ def api_get_audit_details(
         
         # Get count of matching records
         count_query = f"SELECT COUNT(*) FROM audit_pages WHERE {where_clause}"
-        cursor.execute(count_query, params)
-        total_items = cursor.fetchone()[0]
+        await cursor.execute(count_query, params)
+        total_items = await cursor.fetchone()[0]
         
         # Calculate pagination offsets
         import math
@@ -277,18 +278,18 @@ def api_get_audit_details(
         
         # Query sliced records
         pages_query = f"SELECT * FROM audit_pages WHERE {where_clause} ORDER BY crawled_at ASC LIMIT ? OFFSET ?"
-        cursor.execute(pages_query, params + [limit, offset])
-        pages = cursor.fetchall()
+        await cursor.execute(pages_query, params + [limit, offset])
+        pages = await cursor.fetchall()
         
         # Also fetch summary metrics for the whole run
-        cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ?", (run_id,))
-        overall_total = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ? AND is_broken = 1", (run_id,))
-        overall_broken = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ? AND has_redirect = 1", (run_id,))
-        overall_redirect = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ? AND status_code >= 200 AND status_code < 300 AND is_broken = 0", (run_id,))
-        overall_healthy = cursor.fetchone()[0]
+        await cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ?", (run_id,))
+        overall_total = await cursor.fetchone()[0]
+        await cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ? AND is_broken = 1", (run_id,))
+        overall_broken = await cursor.fetchone()[0]
+        await cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ? AND has_redirect = 1", (run_id,))
+        overall_redirect = await cursor.fetchone()[0]
+        await cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ? AND status_code >= 200 AND status_code < 300 AND is_broken = 0", (run_id,))
+        overall_healthy = await cursor.fetchone()[0]
         
         # Parse json fields for run
         run_dict = dict(run)
@@ -336,19 +337,19 @@ def api_get_audit_details(
             }
         }
     finally:
-        conn.close()
+        await conn.close()
 
 @app.get("/api/audit/run/{run_id}/pages/all")
-def api_get_all_audit_pages(run_id: int, user_id: int = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def api_get_all_audit_pages(run_id: int, user_id: int = Depends(get_current_user)):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute("SELECT id FROM audit_runs WHERE id = ? AND user_id = ?", (run_id, user_id))
-        if not cursor.fetchone():
+        await cursor.execute("SELECT id FROM audit_runs WHERE id = ? AND user_id = ?", (run_id, user_id))
+        if not await cursor.fetchone():
             raise HTTPException(status_code=404, detail="Audit run not found.")
             
-        cursor.execute("SELECT * FROM audit_pages WHERE audit_run_id = ? ORDER BY crawled_at ASC", (run_id,))
-        pages = cursor.fetchall()
+        await cursor.execute("SELECT * FROM audit_pages WHERE audit_run_id = ? ORDER BY crawled_at ASC", (run_id,))
+        pages = await cursor.fetchall()
         
         pages_list = []
         for p in pages:
@@ -374,39 +375,50 @@ def api_get_all_audit_pages(run_id: int, user_id: int = Depends(get_current_user
             "pages": pages_list
         }
     finally:
-        conn.close()
+        await conn.close()
 
 @app.post("/api/audit/run/{run_id}/cancel")
-def api_cancel_audit(run_id: int, user_id: int = Depends(get_current_user)):
-    if run_id in ACTIVE_CRAWLS:
-        ACTIVE_CRAWLS[run_id] = "cancelled"
+async def api_cancel_audit(run_id: int, user_id: int = Depends(get_current_user)):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
+    try:
+        await cursor.execute("SELECT status FROM audit_runs WHERE id = ? AND user_id = ?", (run_id, user_id))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Audit run not found.")
+        if row["status"] in ["completed", "failed", "cancelled"]:
+            raise HTTPException(status_code=400, detail=f"Cannot cancel audit in state: {row['status']}")
+        
+        await cursor.execute("UPDATE audit_runs SET status = 'cancelled' WHERE id = ?", (run_id,))
+        await conn.commit()
         return {"message": "Cancellation request registered."}
-    raise HTTPException(status_code=400, detail="Audit is not actively running.")
+    finally:
+        await conn.close()
 
 @app.get("/api/audit/compare")
-def api_compare_audit_runs(
+async def api_compare_audit_runs(
     run_id_1: int,
     run_id_2: int,
     user_id: int = Depends(get_current_user)
 ):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute("SELECT * FROM audit_runs WHERE id = ? AND user_id = ?", (run_id_1, user_id))
-        run1 = cursor.fetchone()
-        cursor.execute("SELECT * FROM audit_runs WHERE id = ? AND user_id = ?", (run_id_2, user_id))
-        run2 = cursor.fetchone()
+        await cursor.execute("SELECT * FROM audit_runs WHERE id = ? AND user_id = ?", (run_id_1, user_id))
+        run1 = await cursor.fetchone()
+        await cursor.execute("SELECT * FROM audit_runs WHERE id = ? AND user_id = ?", (run_id_2, user_id))
+        run2 = await cursor.fetchone()
         
         if not run1 or not run2:
             raise HTTPException(status_code=404, detail="One or both audit runs not found.")
             
-        cursor.execute("SELECT is_broken, has_redirect, status_code, issues_json FROM audit_pages WHERE audit_run_id = ?", (run_id_1,))
-        pages1 = cursor.fetchall()
+        await cursor.execute("SELECT is_broken, has_redirect, status_code, issues_json FROM audit_pages WHERE audit_run_id = ?", (run_id_1,))
+        pages1 = await cursor.fetchall()
         
-        cursor.execute("SELECT is_broken, has_redirect, status_code, issues_json FROM audit_pages WHERE audit_run_id = ?", (run_id_2,))
-        pages2 = cursor.fetchall()
+        await cursor.execute("SELECT is_broken, has_redirect, status_code, issues_json FROM audit_pages WHERE audit_run_id = ?", (run_id_2,))
+        pages2 = await cursor.fetchall()
         
-        def calculate_stats(pages):
+        async def calculate_stats(pages):
             total = len(pages)
             broken = sum(1 for p in pages if p["is_broken"])
             redirects = sum(1 for p in pages if p["has_redirect"])
@@ -465,7 +477,7 @@ def api_compare_audit_runs(
             }
         }
     finally:
-        conn.close()
+        await conn.close()
 
 @app.post("/api/audit/page/{page_id}/reaudit")
 async def api_reaudit_page(page_id: int, user_id: int = Depends(get_current_user)):
@@ -474,10 +486,10 @@ async def api_reaudit_page(page_id: int, user_id: int = Depends(get_current_user
     from bs4 import BeautifulSoup
     from app.crawler import AuditCrawler, is_bot_blocked_robots_txt
     
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute(
+        await cursor.execute(
             """
             SELECT p.*, r.user_id, r.domain, r.details_json as run_details_json 
             FROM audit_pages p
@@ -486,7 +498,7 @@ async def api_reaudit_page(page_id: int, user_id: int = Depends(get_current_user
             """,
             (page_id, user_id)
         )
-        row = cursor.fetchone()
+        row = await cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Page not found.")
             
@@ -598,7 +610,7 @@ async def api_reaudit_page(page_id: int, user_id: int = Depends(get_current_user
         if blocked_bots and "Blocked from crawling by AI agents" not in issues:
             issues.append("Blocked from crawling by AI agents")
             
-        cursor.execute(
+        await cursor.execute(
             """
             UPDATE audit_pages 
             SET status_code = ?, title_tag = ?, meta_description = ?, h1_tag = ?,
@@ -613,54 +625,54 @@ async def api_reaudit_page(page_id: int, user_id: int = Depends(get_current_user
                 page_id
             )
         )
-        conn.commit()
+        await conn.commit()
         return {"message": "Page reaudited successfully"}
     except Exception as e:
-        conn.rollback()
+        await conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        conn.close()
+        await conn.close()
 
 @app.delete("/api/audit/run/{run_id}")
-def api_delete_audit(run_id: int, user_id: int = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def api_delete_audit(run_id: int, user_id: int = Depends(get_current_user)):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute("DELETE FROM audit_runs WHERE id = ? AND user_id = ?", (run_id, user_id))
+        await cursor.execute("DELETE FROM audit_runs WHERE id = ? AND user_id = ?", (run_id, user_id))
         
         # Reset AUTOINCREMENT sequence to current max ID
-        cursor.execute("SELECT MAX(id) FROM audit_runs")
-        max_id_row = cursor.fetchone()
+        await cursor.execute("SELECT MAX(id) FROM audit_runs")
+        max_id_row = await cursor.fetchone()
         max_id = max_id_row[0] if max_id_row and max_id_row[0] is not None else 0
-        cursor.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'audit_runs'", (max_id,))
+        await cursor.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'audit_runs'", (max_id,))
         
-        conn.commit()
+        await conn.commit()
         return {"message": "Audit run deleted successfully."}
     except Exception as e:
-        conn.rollback()
+        await conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        conn.close()
+        await conn.close()
 
 # ----------------- PERFORMANCE AUDIT API -----------------
 
 @app.post("/api/performance/start")
 async def api_start_performance_audit(data: PerformanceStartReq, user_id: int = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     run_id = None
     try:
-        cursor.execute(
+        await cursor.execute(
             "INSERT INTO performance_audits (user_id, url, strategy, status) VALUES (?, ?, ?, 'pending')",
             (user_id, data.url, data.strategy)
         )
-        conn.commit()
+        await conn.commit()
         run_id = cursor.lastrowid
     except Exception as e:
         logger.error(f"Failed to create performance run: {e}")
         raise HTTPException(status_code=500, detail="Failed to initialize performance run.")
     finally:
-        conn.close()
+        await conn.close()
 
     if run_id:
         asyncio.create_task(run_performance_audit_job(run_id, data.url, data.strategy))
@@ -668,11 +680,11 @@ async def api_start_performance_audit(data: PerformanceStartReq, user_id: int = 
     raise HTTPException(status_code=500, detail="Failed to start performance run.")
 
 @app.get("/api/performance/runs")
-def api_get_performance_runs(user_id: int = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def api_get_performance_runs(user_id: int = Depends(get_current_user)):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute(
+        await cursor.execute(
             """
             SELECT id, url, strategy, status, lcp, inp, cls, ttfb, dom_size, created_at 
             FROM performance_audits 
@@ -681,21 +693,21 @@ def api_get_performance_runs(user_id: int = Depends(get_current_user)):
             """,
             (user_id,)
         )
-        rows = cursor.fetchall()
+        rows = await cursor.fetchall()
         return [dict(row) for row in rows]
     finally:
-        conn.close()
+        await conn.close()
 
 @app.get("/api/performance/run/{run_id}")
-def api_get_performance_detail(run_id: int, user_id: int = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def api_get_performance_detail(run_id: int, user_id: int = Depends(get_current_user)):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute(
+        await cursor.execute(
             "SELECT * FROM performance_audits WHERE id = ? AND user_id = ?",
             (run_id, user_id)
         )
-        row = cursor.fetchone()
+        row = await cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Performance run not found.")
         d = dict(row)
@@ -708,40 +720,40 @@ def api_get_performance_detail(run_id: int, user_id: int = Depends(get_current_u
             d["details"] = {}
         return d
     finally:
-        conn.close()
+        await conn.close()
 
 @app.delete("/api/performance/run/{run_id}")
-def api_delete_performance_run(run_id: int, user_id: int = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def api_delete_performance_run(run_id: int, user_id: int = Depends(get_current_user)):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute("DELETE FROM performance_audits WHERE id = ? AND user_id = ?", (run_id, user_id))
+        await cursor.execute("DELETE FROM performance_audits WHERE id = ? AND user_id = ?", (run_id, user_id))
         
         # Reset AUTOINCREMENT sequence to current max ID
-        cursor.execute("SELECT MAX(id) FROM performance_audits")
-        max_id_row = cursor.fetchone()
+        await cursor.execute("SELECT MAX(id) FROM performance_audits")
+        max_id_row = await cursor.fetchone()
         max_id = max_id_row[0] if max_id_row and max_id_row[0] is not None else 0
-        cursor.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'performance_audits'", (max_id,))
+        await cursor.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'performance_audits'", (max_id,))
         
-        conn.commit()
+        await conn.commit()
         return {"message": "Performance run deleted successfully."}
     except Exception as e:
-        conn.rollback()
+        await conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        conn.close()
+        await conn.close()
 
 # ----------------- KEYWORD RANK TRACKER API (Module 3) -----------------
 
 @app.post("/api/keywords")
-def api_add_keyword(data: KeywordAddReq, user_id: int = Depends(get_current_user)):
+async def api_add_keyword(data: KeywordAddReq, user_id: int = Depends(get_current_user)):
     if len(data.competitors) > 3:
         raise HTTPException(status_code=400, detail="Maximum of 3 competitor domains can be tracked.")
     
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute(
+        await cursor.execute(
             """
             INSERT INTO tracked_keywords (user_id, keyword, target_domain, target_geolocation, target_locale, competitors_json)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -755,21 +767,21 @@ def api_add_keyword(data: KeywordAddReq, user_id: int = Depends(get_current_user
                 json.dumps(data.competitors)
             )
         )
-        conn.commit()
+        await conn.commit()
         return {"message": "Keyword added successfully."}
     except Exception as e:
-        conn.rollback()
+        await conn.rollback()
         raise HTTPException(status_code=400, detail="Keyword already tracked for this domain.")
     finally:
-        conn.close()
+        await conn.close()
 
 @app.get("/api/keywords")
-def api_get_keywords(user_id: int = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def api_get_keywords(user_id: int = Depends(get_current_user)):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
         # Get keywords along with their most recent rank
-        cursor.execute(
+        await cursor.execute(
             """
             SELECT tk.id, tk.keyword, tk.target_domain, tk.target_geolocation, tk.target_locale, tk.competitors_json, tk.created_at,
                    kh.rank_position, kh.ranking_url, kh.competitor_ranks_json, kh.checked_at
@@ -786,7 +798,7 @@ def api_get_keywords(user_id: int = Depends(get_current_user)):
             """,
             (user_id,)
         )
-        rows = cursor.fetchall()
+        rows = await cursor.fetchall()
         
         res = []
         for row in rows:
@@ -809,23 +821,23 @@ def api_get_keywords(user_id: int = Depends(get_current_user)):
             res.append(d)
         return res
     finally:
-        conn.close()
+        await conn.close()
 
 @app.get("/api/keywords/{kw_id}/history")
-def api_get_keyword_history(kw_id: int, user_id: int = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def api_get_keyword_history(kw_id: int, user_id: int = Depends(get_current_user)):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
         # Verify ownership
-        cursor.execute("SELECT id FROM tracked_keywords WHERE id = ? AND user_id = ?", (kw_id, user_id))
-        if not cursor.fetchone():
+        await cursor.execute("SELECT id FROM tracked_keywords WHERE id = ? AND user_id = ?", (kw_id, user_id))
+        if not await cursor.fetchone():
             raise HTTPException(status_code=404, detail="Tracked keyword not found.")
             
-        cursor.execute(
+        await cursor.execute(
             "SELECT rank_position, ranking_url, competitor_ranks_json, checked_at FROM keyword_rank_history WHERE tracked_keyword_id = ? ORDER BY checked_at ASC",
             (kw_id,)
         )
-        rows = cursor.fetchall()
+        rows = await cursor.fetchall()
         
         res = []
         for row in rows:
@@ -840,21 +852,21 @@ def api_get_keyword_history(kw_id: int, user_id: int = Depends(get_current_user)
             res.append(d)
         return res
     finally:
-        conn.close()
+        await conn.close()
 
 @app.delete("/api/keywords/{kw_id}")
-def api_delete_keyword(kw_id: int, user_id: int = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+async def api_delete_keyword(kw_id: int, user_id: int = Depends(get_current_user)):
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute("DELETE FROM tracked_keywords WHERE id = ? AND user_id = ?", (kw_id, user_id))
-        conn.commit()
+        await cursor.execute("DELETE FROM tracked_keywords WHERE id = ? AND user_id = ?", (kw_id, user_id))
+        await conn.commit()
         return {"message": "Keyword deleted successfully."}
     except Exception as e:
-        conn.rollback()
+        await conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        conn.close()
+        await conn.close()
 
 @app.post("/api/keywords/trigger")
 async def api_trigger_rank_update(user_id: int = Depends(get_current_user)):

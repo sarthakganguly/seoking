@@ -1,5 +1,5 @@
 import os
-import sqlite3
+import aiosqlite
 import logging
 
 # Configure logger based on environment variables
@@ -17,21 +17,21 @@ else:
 
 DB_PATH = os.environ.get("DATABASE_URL", "/app/data/seoking.db")
 
-def get_db_connection():
+async def get_db_connection():
     """
     Returns a sqlite3 connection with Row factory configured.
     Enforces foreign keys, WAL journal mode, busy timeouts, and synchronous optimization 
     to handle heavy concurrent writes during multi-tab crawling without database lock conflicts.
     """
-    conn = sqlite3.connect(DB_PATH, timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON;")
-    conn.execute("PRAGMA journal_mode = WAL;")
-    conn.execute("PRAGMA busy_timeout = 30000;")
-    conn.execute("PRAGMA synchronous = NORMAL;")
+    conn = await aiosqlite.connect(DB_PATH, timeout=30.0)
+    conn.row_factory = aiosqlite.Row
+    await conn.execute("PRAGMA foreign_keys = ON;")
+    await conn.execute("PRAGMA journal_mode = WAL;")
+    await conn.execute("PRAGMA busy_timeout = 30000;")
+    await conn.execute("PRAGMA synchronous = NORMAL;")
     return conn
 
-def init_db():
+async def init_db():
     """
     Initializes the SQLite database schema if not already set up.
     Creates tables and indexes defined in docs/SCHEMA.md.
@@ -59,6 +59,13 @@ def init_db():
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
         UNIQUE(user_id, setting_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS user_sessions (
+        session_token TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS audit_runs (
@@ -138,87 +145,87 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_perf_audits_user_date ON performance_audits(user_id, created_at DESC);
     """
 
-    conn = get_db_connection()
+    conn = await get_db_connection()
     try:
         # Create standard tables if not present
-        conn.executescript(schema)
-        conn.commit()
+        await conn.executescript(schema)
+        await conn.commit()
         
         # Self-healing migration for existing databases
-        cursor = conn.cursor()
+        cursor = await conn.cursor()
         
         # Check audit_runs columns
-        cursor.execute("PRAGMA table_info(audit_runs)")
-        runs_cols = [row["name"] for row in cursor.fetchall()]
+        await cursor.execute("PRAGMA table_info(audit_runs)")
+        runs_cols = [row["name"] for row in await cursor.fetchall()]
         if "details_json" not in runs_cols:
-            cursor.execute("ALTER TABLE audit_runs ADD COLUMN details_json TEXT;")
+            await cursor.execute("ALTER TABLE audit_runs ADD COLUMN details_json TEXT;")
             logger.info("Database migration: Added details_json to audit_runs table")
             
         # Check audit_pages columns
-        cursor.execute("PRAGMA table_info(audit_pages)")
-        pages_cols = [row["name"] for row in cursor.fetchall()]
+        await cursor.execute("PRAGMA table_info(audit_pages)")
+        pages_cols = [row["name"] for row in await cursor.fetchall()]
         if "canonical_url" not in pages_cols:
-            cursor.execute("ALTER TABLE audit_pages ADD COLUMN canonical_url TEXT;")
+            await cursor.execute("ALTER TABLE audit_pages ADD COLUMN canonical_url TEXT;")
             logger.info("Database migration: Added canonical_url to audit_pages table")
         if "is_noindex" not in pages_cols:
-            cursor.execute("ALTER TABLE audit_pages ADD COLUMN is_noindex BOOLEAN DEFAULT 0;")
+            await cursor.execute("ALTER TABLE audit_pages ADD COLUMN is_noindex BOOLEAN DEFAULT 0;")
             logger.info("Database migration: Added is_noindex to audit_pages table")
         if "word_count" not in pages_cols:
-            cursor.execute("ALTER TABLE audit_pages ADD COLUMN word_count INTEGER;")
+            await cursor.execute("ALTER TABLE audit_pages ADD COLUMN word_count INTEGER;")
             logger.info("Database migration: Added word_count to audit_pages table")
         if "issues_json" not in pages_cols:
-            cursor.execute("ALTER TABLE audit_pages ADD COLUMN issues_json TEXT;")
+            await cursor.execute("ALTER TABLE audit_pages ADD COLUMN issues_json TEXT;")
             logger.info("Database migration: Added issues_json to audit_pages table")
         if "details_json" not in pages_cols:
-            cursor.execute("ALTER TABLE audit_pages ADD COLUMN details_json TEXT;")
+            await cursor.execute("ALTER TABLE audit_pages ADD COLUMN details_json TEXT;")
             logger.info("Database migration: Added details_json to audit_pages table")
             
         # Check tracked_keywords columns
-        cursor.execute("PRAGMA table_info(tracked_keywords)")
-        keywords_cols = [row["name"] for row in cursor.fetchall()]
+        await cursor.execute("PRAGMA table_info(tracked_keywords)")
+        keywords_cols = [row["name"] for row in await cursor.fetchall()]
         if "competitors_json" not in keywords_cols:
-            cursor.execute("ALTER TABLE tracked_keywords ADD COLUMN competitors_json TEXT;")
+            await cursor.execute("ALTER TABLE tracked_keywords ADD COLUMN competitors_json TEXT;")
             logger.info("Database migration: Added competitors_json to tracked_keywords table")
 
         # Check keyword_rank_history columns
-        cursor.execute("PRAGMA table_info(keyword_rank_history)")
-        history_cols = [row["name"] for row in cursor.fetchall()]
+        await cursor.execute("PRAGMA table_info(keyword_rank_history)")
+        history_cols = [row["name"] for row in await cursor.fetchall()]
         if "competitor_ranks_json" not in history_cols:
-            cursor.execute("ALTER TABLE keyword_rank_history ADD COLUMN competitor_ranks_json TEXT;")
+            await cursor.execute("ALTER TABLE keyword_rank_history ADD COLUMN competitor_ranks_json TEXT;")
             logger.info("Database migration: Added competitor_ranks_json to keyword_rank_history table")
 
-        conn.commit()
+        await conn.commit()
         logger.info("Database initialized successfully with tables, indexes, and migrations.")
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
         raise e
     finally:
-        conn.close()
+        await conn.close()
 
-def get_user_setting(user_id: int, key: str, default: str = None) -> str:
+async def get_user_setting(user_id: int, key: str, default: str = None) -> str:
     """
     Retrieves a user setting from SQLite database.
     """
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute("SELECT setting_value FROM user_settings WHERE user_id = ? AND setting_key = ?", (user_id, key))
-        row = cursor.fetchone()
+        await cursor.execute("SELECT setting_value FROM user_settings WHERE user_id = ? AND setting_key = ?", (user_id, key))
+        row = await cursor.fetchone()
         return row["setting_value"] if row else default
     except Exception as e:
         logger.error(f"Error fetching user setting {key}: {e}")
         return default
     finally:
-        conn.close()
+        await conn.close()
 
-def set_user_setting(user_id: int, key: str, value: str):
+async def set_user_setting(user_id: int, key: str, value: str):
     """
     Inserts or updates a user setting in SQLite database.
     """
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = await get_db_connection()
+    cursor = await conn.cursor()
     try:
-        cursor.execute(
+        await cursor.execute(
             """
             INSERT INTO user_settings (user_id, setting_key, setting_value)
             VALUES (?, ?, ?)
@@ -227,12 +234,12 @@ def set_user_setting(user_id: int, key: str, value: str):
             """,
             (user_id, key, str(value))
         )
-        conn.commit()
+        await conn.commit()
         logger.info(f"Setting {key} updated to {value} for user_id: {user_id}")
     except Exception as e:
-        conn.rollback()
+        await conn.rollback()
         logger.error(f"Error updating user setting {key}: {e}")
         raise e
     finally:
-        conn.close()
+        await conn.close()
 

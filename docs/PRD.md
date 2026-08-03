@@ -306,9 +306,9 @@ The core scanning and auditing pipeline evaluates websites page-by-page across e
 
 ---
 
-## **5. Standalone Utility Tools Suite (19 Interactive Utilities)**
+## **5. Standalone Utility Tools Suite (20 Interactive Utilities)**
 
-The application features a suite of 19 standalone tools. Every generator tool operates **100% ephemerally in-memory**, featuring client-side Blob downloading:
+The application features a suite of 20 standalone tools. Every generator tool operates **100% ephemerally in-memory**, featuring client-side Blob downloading:
 
 1. **Robots.txt Creator & Rule Tester:** Generate compliance texts with pre-populated Google user-agents (`*`, `Googlebot`, `Googlebot-Image`, `Google-Extended`), Google Search Central quick presets, and optional `Sitemap:` directives.
 2. **Multi-Schema JSON-LD Markup Generator:** Form-based JSON builder outputting validated schemas (e.g., Products, local businesses).
@@ -329,6 +329,7 @@ The application features a suite of 19 standalone tools. Every generator tool op
 17. **Server Maintenance Mode Helper:** Test HTTP responses to confirm `503 Service Unavailable` + `Retry-After` parameters.
 18. **Indexing API Integration Advisor:** Validate service account credentials for Google Indexing API access.
 19. **Local SEO & NAP Alignment Auditor:** Audit contact page details against footer texts to confirm 100% NAP consistency.
+20. **Server-Side Redirect Code Generator:** Form-based wizard that generates valid server-side redirect configuration code for Apache (.htaccess, mod_alias, mod_rewrite) and NGINX[cite: 1]. It outputs the exact syntax for permanent (301) and temporary (302) redirects based on user-provided source and destination URLs, operating ephemerally in-memory[cite: 1].
 
 ---
 
@@ -345,7 +346,7 @@ The application features a suite of 19 standalone tools. Every generator tool op
 * **Backend:** Python 3.11+ / FastAPI
 * **Automation:** Playwright Python wrapper (`playwright-stealth` enabled)
 * **Display Stream:** Xvfb, x11vnc, websockify, noVNC
-* **Database:** SQLite (`data/seoking.db`) with self-healing startup migrations
+* **Database:** SQLite (`data/seoking.db`) via `aiosqlite` with self-healing startup migrations
 * **Frontend:** Vanilla JS / Vanilla CSS, modular component structure (`tools-registry.js`, `tools-widgets.js`, `tools-schema-builder.js`, `tools-hub.js`)
 
 ---

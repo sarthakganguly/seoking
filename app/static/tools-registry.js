@@ -295,6 +295,27 @@ const TOOLS_REGISTRY = [
             { id: "ls-address", name: "address", label: "Address", type: "text" },
             { id: "ls-phone", name: "phone", label: "Phone", type: "text" }
         ] 
+    },
+    { 
+        id: "redirectgen", 
+        name: "Server-Side Redirect Code Generator", 
+        desc: "Generate valid server-side redirect configuration code for Apache and NGINX.", 
+        action: "Generate Redirect Code", 
+        endpoint: "/api/tools/redirect-generator", 
+        fields: [
+            { id: "rg-source", name: "source_url", label: "Source URL Path (e.g., /old-page)", type: "text", placeholder: "/old-page" },
+            { id: "rg-dest", name: "destination_url", label: "Destination URL (e.g., https://example.com/new-page)", type: "url", placeholder: "https://example.com/new-page" },
+            { 
+                id: "rg-type", 
+                name: "redirect_type", 
+                label: "Redirect Type", 
+                type: "select", 
+                options: [
+                    { value: "301", label: "301 Permanent Redirect" },
+                    { value: "302", label: "302 Temporary Redirect" }
+                ] 
+            }
+        ] 
     }
 ];
 

@@ -7,6 +7,7 @@ let currentUser = null;
 let currentSettings = {};
 let activeView = "dashboard";
 let socket = null;
+let currentAudienceLens = "non-technical";
 
 // Module states
 let selectedAuditPages = [];
@@ -104,6 +105,20 @@ function setupEventListeners() {
     // Theme toggle button click
     document.getElementById("theme-toggle-btn").addEventListener("click", toggleTheme);
 
+    // Global Audience Lens
+    const lensSelect = document.getElementById("global-lens-select");
+    if (lensSelect) {
+        lensSelect.addEventListener("change", (e) => {
+            currentAudienceLens = e.target.value;
+            // Update document attribute for CSS targeting
+            document.documentElement.setAttribute("data-lens", currentAudienceLens);
+            // Refresh audit list if open
+            if (activeView === "audit" && currentOpenAuditRunId) {
+                renderIssuesTabList();
+            }
+        });
+    }
+
     // Auth forms
     document.getElementById("login-form").addEventListener("submit", handleLogin);
     document.getElementById("register-form").addEventListener("submit", handleRegister);
@@ -146,7 +161,13 @@ function handleHashRouting() {
     }
     
     if (hash.startsWith("tools/")) {
-        const toolId = hash.split("/")[1];
+        let toolId = hash.split("/")[1];
+        let queryString = "";
+        if (toolId && toolId.includes("?")) {
+            const parts = toolId.split("?");
+            toolId = parts[0];
+            queryString = "?" + parts[1];
+        }
         switchView("single-tool"); 
         
         // Highlight tools hub in sidebar
@@ -158,7 +179,7 @@ function handleHashRouting() {
         document.getElementById("breadcrumb-current").innerText = "Tools";
 
         if (typeof renderSingleTool === 'function') {
-            renderSingleTool(toolId);
+            renderSingleTool(toolId, queryString);
         }
     } else {
         switchView(hash);
@@ -497,16 +518,15 @@ async function loadDashboardMetrics() {
                 const limit = parseInt(currentSettings.audit_pagination_limit || "100");
                 const detailRes = await fetch(`/api/audit/run/${latestCompleted.id}?page=1&limit=${limit}&filter_type=all`);
                 const detailData = await detailRes.json();
-                const total = detailData.metrics.total;
-                const healthy = detailData.metrics.healthy;
-                const score = total > 0 ? Math.round((healthy / total) * 100) : 100;
-                document.getElementById("dash-site-health").innerText = score + "%";
+                document.getElementById("ledger-last-run").innerText = "Last Audit: " + formatDate(latestCompleted.completed_at || latestCompleted.started_at);
+                renderRiskLedger(detailData.issues);
             } catch (e) {
                 console.error("Failed to load latest audit health for dashboard:", e);
                 document.getElementById("dash-site-health").innerText = "--";
             }
         } else {
-            document.getElementById("dash-site-health").innerText = "--";
+            document.getElementById("ledger-last-run").innerText = "No recent audits";
+            document.getElementById("risk-ledger-content").innerHTML = `<div class="empty-state">Run a Site Audit to populate the Risk Ledger.</div>`;
         }
         
         // Render recent audit table
@@ -543,6 +563,56 @@ async function loadDashboardMetrics() {
     } catch (e) {
         console.error("Failed to load dashboard metrics:", e);
     }
+}
+
+function renderRiskLedger(issuesList) {
+    if (!issuesList || issuesList.length === 0) {
+        document.getElementById("risk-ledger-content").innerHTML = `<div class="empty-state">No issues found in the latest audit!</div>`;
+        return;
+    }
+    
+    // Group issues by category logic similar to getCategoryFromIssueName
+    const categoryCounts = {
+        "Indexability": { errors: 0, warnings: 0, notices: 0 },
+        "Content": { errors: 0, warnings: 0, notices: 0 },
+        "Links": { errors: 0, warnings: 0, notices: 0 },
+        "Performance": { errors: 0, warnings: 0, notices: 0 },
+        "Other": { errors: 0, warnings: 0, notices: 0 }
+    };
+    
+    issuesList.forEach(iss => {
+        const cat = getCategoryFromIssueName(iss.name);
+        const mappedCat = categoryCounts[cat] ? cat : "Other";
+        if (iss.severity === "error" || iss.severity === "errors") categoryCounts[mappedCat].errors++;
+        else if (iss.severity === "warning" || iss.severity === "warnings") categoryCounts[mappedCat].warnings++;
+        else categoryCounts[mappedCat].notices++;
+    });
+    
+    let html = `<div class="risk-ledger-grid" style="display:flex; flex-direction:column; gap: 12px;">`;
+    
+    for (const [cat, counts] of Object.entries(categoryCounts)) {
+        const total = counts.errors + counts.warnings + counts.notices;
+        if (total === 0) continue; // Skip empty categories
+        
+        const errPct = (counts.errors / total) * 100;
+        const warnPct = (counts.warnings / total) * 100;
+        const notPct = (counts.notices / total) * 100;
+        
+        html += `
+            <div class="ledger-row" style="display:flex; align-items:center; gap: 15px;">
+                <div style="width: 120px; font-weight: 600; font-size: 0.9em; text-align: right;">${cat}</div>
+                <div style="flex:1; height: 24px; background: #222; border-radius: 4px; overflow: hidden; display: flex;">
+                    ${counts.errors > 0 ? `<div style="width: ${errPct}%; background: var(--danger-color);" title="${counts.errors} Errors"></div>` : ''}
+                    ${counts.warnings > 0 ? `<div style="width: ${warnPct}%; background: var(--warning-color);" title="${counts.warnings} Warnings"></div>` : ''}
+                    ${counts.notices > 0 ? `<div style="width: ${notPct}%; background: var(--success-color);" title="${counts.notices} Notices"></div>` : ''}
+                </div>
+                <div style="width: 60px; font-size: 0.85em; color: var(--text-muted);">${total} issues</div>
+            </div>
+        `;
+    }
+    
+    html += `</div>`;
+    document.getElementById("risk-ledger-content").innerHTML = html;
 }
 
 function viewAuditDetailsDirect(runId) {
@@ -1407,142 +1477,77 @@ function filterIssuesList() {
     });
 }
 
-function renderIssuesTabList() {
-    const container = document.getElementById("issues-accordion-container");
-    if (!container) return;
-    
-    let html = "";
-    
-    const severities = activeIssuesSeverityFilter === "all" 
-        ? ["errors", "warnings", "notices"] 
-        : [activeIssuesSeverityFilter];
-        
-    let matchesFound = false;
-    
-    severities.forEach(sev => {
-        const issues = Object.values(groupedIssues[sev] || {});
-        issues.forEach(iss => {
-            if (!matchCategoryFilter(iss.name, activeIssuesCategoryFilter)) return;
-            
-            matchesFound = true;
-            const label = sev === "errors" ? "Error" : sev === "warnings" ? "Warning" : "Notice";
-            
-            html += `
-                <div class="issue-accordion-item">
-                    <div class="issue-accordion-header" onclick="toggleIssueAccordion(this)">
-                        <div class="issue-header-left">
-                            <span class="badge ${sev === 'errors' ? 'badge-danger' : sev === 'warnings' ? 'badge-warning' : 'badge-success'}">${label}</span>
-                            <span class="issue-header-title">${escapeHtml(iss.name)}</span>
-                        </div>
-                        <span class="issue-header-count">${iss.pages.length} pages</span>
-                    </div>
-                    <div class="issue-accordion-body hidden">
-                        <div class="issue-desc-box">
-                            This issue affects ${iss.pages.length} crawled pages. Review the diagnostic breakdown or fix details.
-                        </div>
-                        <button class="btn btn-sm btn-primary" onclick="showSingleIssueDetails('${sev}', '${escapeHtml(iss.name)}')">View Affected Pages</button>
-                    </div>
-                </div>
-            `;
-        });
-    });
-    
-    if (!matchesFound) {
-        container.innerHTML = `<div class="empty-state">No matching issues found.</div>`;
-    } else {
-        container.innerHTML = html;
-    }
-}
 
-function matchCategoryFilter(issueName, cat) {
-    if (cat === "all") return true;
-    const name = issueName.toLowerCase();
-    if (cat === "ai") {
-        return name.includes("ai") || name.includes("bot");
-    }
-    if (cat === "crawl") {
-        return name.includes("broken") || name.includes("redirect") || name.includes("status") || name.includes("failure") || name.includes("orphan") || name.includes("robots");
-    }
-    if (cat === "content") {
-        return name.includes("thin") || name.includes("words") || name.includes("hierarchy") || name.includes("h1") || name.includes("anchor") || name.includes("alt") || name.includes("image");
-    }
-    if (cat === "meta") {
-        return name.includes("title") || name.includes("description") || name.includes("canonical") || name.includes("noindex");
-    }
-    return false;
-}
-
-function toggleIssueAccordion(headerEl) {
-    const body = headerEl.nextElementSibling;
-    if (body) {
-        body.classList.toggle("hidden");
-    }
-}
-
-function showSingleIssueDetails(sev, issueName) {
-    const lv = document.getElementById("issues-list-view");
-    if (lv) lv.classList.add("hidden");
-    const singleView = document.getElementById("single-issue-detail-view");
-    if (singleView) singleView.classList.remove("hidden");
-    
-    const issue = groupedIssues[sev][issueName];
-    if (!issue) return;
-    
-    const tEl = document.getElementById("single-issue-title");
-    if (tEl) tEl.innerText = issue.name;
-    const badge = document.getElementById("single-issue-severity-badge");
-    if (badge) {
-        badge.innerText = sev.toUpperCase();
-        badge.className = `badge ${sev === 'errors' ? 'badge-danger' : sev === 'warnings' ? 'badge-warning' : 'badge-success'}`;
-    }
-    
-    const totalPages = allPagesCached.length;
-    const affected = issue.pages.length;
-    const clean = totalPages - affected;
-    
-    const fc = document.getElementById("single-issue-failed-count");
-    if (fc) fc.innerText = affected;
-    const sc = document.getElementById("single-issue-success-count");
-    if (sc) sc.innerText = clean;
-    
-    const pct = totalPages > 0 ? (affected / totalPages) * 100 : 0;
-    const fill = document.getElementById("single-issue-progress-fill");
-    if (fill) fill.style.width = pct + "%";
-    
-    let fixInfo = "Review the affected pages below and fix their metadata or linkage.";
+function getLensExplanation(issueName, lens) {
     const lower = issueName.toLowerCase();
-    if (lower.includes("broken")) {
-        fixInfo = "Fix the source link or restore the page path to return a 200 status code. Update outbound references to point to valid endpoints.";
-    } else if (lower.includes("redirect")) {
-        fixInfo = "Resolve redirect chains or update links to point directly to the destination URL, preserving crawler efficiency.";
-    } else if (lower.includes("title tag")) {
-        fixInfo = "Ensure each page has a unique, descriptive <title> tag between 30 and 60 characters.";
-    } else if (lower.includes("meta description")) {
-        fixInfo = "Provide a unique, relevant meta description tag of 120-160 characters to improve CTR in search results.";
-    } else if (lower.includes("canonical")) {
-        fixInfo = "Configure a valid absolute <link rel='canonical'> to designate the preferred version of the content.";
-    } else if (lower.includes("h1 header")) {
-        fixInfo = "Add a single primary <h1> heading to structure the page content semantically.";
-    } else if (lower.includes("hierarchy jump")) {
-        fixInfo = "Maintain strict descending order of headings (e.g. H1 followed by H2, then H3) without skipping levels.";
-    } else if (lower.includes("thin content")) {
-        fixInfo = "Increase content depth with relevant text to exceed 300 words. Address thin content penalty risks.";
-    } else if (lower.includes("alt tags") || lower.includes("image")) {
-        fixInfo = "Add descriptive 'alt' attributes to all <img> tags to describe visual content for accessibility and image search.";
-    } else if (lower.includes("blocked") || lower.includes("robots")) {
-        fixInfo = "Update your robots.txt directives to permit crawling by ChatGPT, Google-Extended, and other search engines.";
+    
+    // Developer Lens
+    if (lens === "developer") {
+        if (lower.includes("broken")) return "4xx/5xx status codes returned from target endpoints.";
+        if (lower.includes("redirect")) return "301/302 redirect chains or loops detected.";
+        if (lower.includes("title tag") || lower.includes("meta description")) return "Metadata length validation failed or tags missing in the <head>.";
+        if (lower.includes("robots") || lower.includes("blocked")) return "Disallow directives found in robots.txt blocking User-Agent access.";
+        if (lower.includes("schema")) return "JSON-LD structured data validation failed.";
+        if (lower.includes("sitemap")) return "Orphan pages found or sitemap XML malformed.";
+        if (lower.includes("h1") || lower.includes("hierarchy")) return "DOM hierarchy violates semantic HTML5 outline (e.g. skipped heading levels).";
+        if (lower.includes("thin content")) return "DOM parsing indicates low word count (<300 words).";
+        if (lower.includes("js rendering")) return "High variance between raw HTML and post-render DOM.";
+        return "System flagged " + issueName + " during DOM and header inspection.";
+    } 
+    
+    // SEO Manager Lens
+    else if (lens === "seo-manager") {
+        if (lower.includes("broken")) return "Broken links waste crawl budget and create poor user experience.";
+        if (lower.includes("redirect")) return "Redirect chains dilute link equity (PageRank) and slow down crawling.";
+        if (lower.includes("title tag") || lower.includes("meta description")) return "Suboptimal metadata negatively impacts CTR in the SERPs.";
+        if (lower.includes("robots") || lower.includes("blocked")) return "These pages are actively blocked from indexation via robots.txt.";
+        if (lower.includes("schema")) return "Malformed schema prevents rich snippets from appearing in SERPs.";
+        if (lower.includes("sitemap")) return "Sitemap issues prevent efficient discovery of new content.";
+        if (lower.includes("h1") || lower.includes("hierarchy")) return "Heading issues dilute keyword relevance and page structure signals.";
+        if (lower.includes("thin content")) return "Pages with thin content are at risk of Panda penalties or algorithmic devaluation.";
+        if (lower.includes("js rendering")) return "Reliance on Client-Side Rendering may delay indexation.";
+        return "SEO Risk: " + issueName + " which may negatively impact rankings.";
+    } 
+    
+    // Non-Technical Lens (Default)
+    else {
+        if (lower.includes("broken")) return "When visitors click these links, they get an error page. We need to fix them.";
+        if (lower.includes("redirect")) return "These links forward visitors multiple times before loading the page. It makes the site feel slow.";
+        if (lower.includes("title tag") || lower.includes("meta description")) return "The text that shows up in Google search results is either missing or the wrong length.";
+        if (lower.includes("robots") || lower.includes("blocked")) return "We've told Google not to look at these pages, so they won't show up in search results.";
+        if (lower.includes("schema")) return "The special code that gives Google extra details (like star ratings) is broken.";
+        if (lower.includes("sitemap")) return "Google is having a hard time finding all your pages.";
+        if (lower.includes("h1") || lower.includes("hierarchy")) return "The page headers are out of order, making it hard for readers and Google to skim.";
+        if (lower.includes("thin content")) return "These pages don't have enough text. Google prefers in-depth articles.";
+        if (lower.includes("js rendering")) return "The page requires a lot of processing to load, which Google might skip.";
+        return "We found an issue: " + issueName + ". This can make it harder for customers to find your site.";
     }
-    
-    const fixEl = document.getElementById("single-issue-how-to-fix");
-    if (fixEl) fixEl.innerText = fixInfo;
-    
-    const table = document.getElementById("single-issue-pages-table");
-    if (!table) return;
+}
 
+function getIssueToolRecommendation(issueName) {
+    const lower = issueName.toLowerCase();
+    if (lower.includes("broken") || lower.includes("redirect")) return { id: "redirect", name: "Redirect Tracer" };
+    if (lower.includes("robots") || lower.includes("blocked")) return { id: "robotstester", name: "Robots.txt Tester" };
+    if (lower.includes("schema markup")) return { id: "schema", name: "JSON-LD Generator" };
+    if (lower.includes("sitemap") || lower.includes("orphan")) return { id: "sitemap", name: "Sitemap Builder" };
+    if (lower.includes("hreflang")) return { id: "hreflang", name: "Hreflang Mapper" };
+    if (lower.includes("e-e-a-t") || lower.includes("thin content")) return { id: "eeat", name: "E-E-A-T Wizard" };
+    if (lower.includes("discover")) return { id: "discover", name: "Discover Tag Builder" };
+    if (lower.includes("safesearch") || lower.includes("adult")) return { id: "safesearch", name: "SafeSearch Classifier" };
+    if (lower.includes("js rendering reliance")) return { id: "spadiff", name: "SPA Lazy-Load Tester" };
+    if (lower.includes("traffic drop")) return { id: "gsc", name: "GSC Diagnoser" };
+    if (lower.includes("local seo") || lower.includes("nap")) return { id: "localseo", name: "NAP Auditor" };
+    return null;
+}
+
+function generateIssueTableHtml(issueName, pages) {
+    const lower = issueName.toLowerCase();
     let headerHtml = `
-        <tr>
-            <th>Page URL</th>
-            <th>Status Code</th>
+        <table class="finding-card-table">
+            <thead>
+                <tr>
+                    <th>Page URL</th>
+                    <th>Status Code</th>
     `;
     
     let hasDetailsCol = true;
@@ -1587,89 +1592,171 @@ function showSingleIssueDetails(sev, issueName) {
     }
     
     headerHtml += `
-            <th>Actions</th>
-        </tr>
-    `;
-    const thead = table.querySelector("thead");
-    if (thead) thead.innerHTML = headerHtml;
-
-    const tbody = table.querySelector("tbody");
-    if (tbody) {
-        tbody.innerHTML = issue.pages.map(p => {
-            let rowHtml = `
-                <tr>
-                    <td><strong class="word-break">${escapeHtml(p.url)}</strong></td>
-                    <td><span class="badge ${p.status_code === 200 ? 'badge-success' : p.status_code >= 400 ? 'badge-danger' : 'badge-warning'}">${p.status_code || "ERR"}</span></td>
-            `;
-            
-            if (hasDetailsCol) {
-                let cellValue = "";
-                if (lower.includes("title tag too short") || lower.includes("title tag too long")) {
-                    const titleText = p.title_tag || "None";
-                    const titleLen = p.title_tag ? p.title_tag.length : 0;
-                    cellValue = `<code>"${escapeHtml(titleText)}"</code> (${titleLen} chars)`;
-                } else if (lower.includes("missing title tag")) {
-                    cellValue = `<span class="badge badge-danger">Missing</span>`;
-                } else if (lower.includes("thin content")) {
-                    cellValue = `<strong>${p.word_count || 0}</strong> words`;
-                } else if (lower.includes("meta description too short") || lower.includes("meta description too long")) {
-                    const metaText = p.meta_description || "None";
-                    const metaLen = p.meta_description ? p.meta_description.length : 0;
-                    cellValue = `<code>"${escapeHtml(metaText)}"</code> (${metaLen} chars)`;
-                } else if (lower.includes("missing meta description")) {
-                    cellValue = `<span class="badge badge-danger">Missing</span>`;
-                } else if (lower.includes("missing alt tags")) {
-                    const imgs = p.details?.images || { total: 0, missing_alts_count: 0, missing_alts: [] };
-                    const listItems = (imgs.missing_alts || []).map(src => `<li style="margin-top:4px;" class="word-break"><code>${escapeHtml(src)}</code></li>`).join("");
-                    cellValue = `
-                        <strong>${imgs.missing_alts_count}</strong> images missing alt
-                        ${listItems ? `<ul class="bullet-list" style="margin-left: 15px; margin-top: 5px; font-size: 11px; list-style-type: disc;">${listItems}</ul>` : ""}
-                    `;
-                } else if (lower.includes("missing canonical tag")) {
-                    cellValue = `<span class="badge badge-danger">Missing</span>`;
-                } else if (lower.includes("canonical mismatch")) {
-                    cellValue = `Expected canonical: <code class="word-break">${escapeHtml(p.canonical_url || "None")}</code>`;
-                } else if (lower.includes("missing h1 header")) {
-                    cellValue = `<span class="badge badge-danger">Missing</span>`;
-                } else if (lower.includes("multiple h1 headers")) {
-                    const h1s = (p.details?.header_hierarchy || [])
-                        .filter(h => Array.isArray(h) && (h[0] === 'h1' || h[0]?.toLowerCase() === 'h1'))
-                        .map(h => `<li><code>"${escapeHtml(h[1])}"</code></li>`)
-                        .join("");
-                    cellValue = h1s 
-                        ? `<ul class="bullet-list" style="margin-left: 15px; font-size: 11px; list-style-type: disc;">${h1s}</ul>`
-                        : `<code>First: "${escapeHtml(p.h1_tag || "None")}"</code>`;
-                } else if (lower.includes("hierarchy jump")) {
-                    const violations = (p.issues || []).filter(iss => iss.toLowerCase().includes("hierarchy jump"));
-                    cellValue = violations.length > 0 
-                        ? `<ul class="bullet-list" style="margin-left: 15px; font-size: 11px; list-style-type: disc;">${violations.map(v => `<li><code>${escapeHtml(v)}</code></li>`).join("")}</ul>`
-                        : `<span class="badge badge-warning">Heading hierarchy jump detected</span>`;
-                } else if (lower.includes("high js rendering reliance")) {
-                    cellValue = `<span class="badge badge-warning">High JS reliance</span>`;
-                } else if (lower.includes("malformed schema markup")) {
-                    cellValue = `<span class="badge badge-danger">Malformed JSON-LD</span>`;
-                } else if (lower.includes("redundant taxonomy page")) {
-                    cellValue = `<span class="badge badge-warning">Category/Archive page</span>`;
-                } else if (lower.includes("broken")) {
-                    const refs = p.details?.incoming_links || [];
-                    const listItems = refs.map(ref => `<li style="margin-top:4px;" class="word-break"><a href="${escapeHtml(ref)}" target="_blank" class="link-primary" onclick="event.stopPropagation();">${escapeHtml(ref)}</a></li>`).join("");
-                    cellValue = listItems 
-                        ? `<ul class="bullet-list" style="margin-left: 15px; font-size: 11px; list-style-type: disc;">${listItems}</ul>`
-                        : `<span class="text-muted">None (Direct / Seed URL)</span>`;
-                } else if (lower.includes("http error") || lower.includes("network") || lower.includes("failure")) {
-                    cellValue = `<span class="badge badge-danger">${escapeHtml(p.status_code ? 'HTTP ' + p.status_code : 'Connection Failed')}</span>`;
-                } else {
-                    cellValue = `<span class="badge badge-info">Warning details</span>`;
-                }
-                rowHtml += `<td>${cellValue}</td>`;
-            }
-            
-            rowHtml += `
-                    <td><button class="btn btn-xs btn-primary" onclick="event.stopPropagation(); triggerReaudit(${p.id})">Reaudit</button></td>
+                    <th>Actions</th>
                 </tr>
+            </thead>
+            <tbody>
+    `;
+
+    const bodyHtml = pages.map(p => {
+        let rowHtml = `
+            <tr>
+                <td><strong class="word-break">${escapeHtml(p.url)}</strong></td>
+                <td><span class="badge ${p.status_code === 200 ? 'badge-success' : p.status_code >= 400 ? 'badge-danger' : 'badge-warning'}">${p.status_code || "ERR"}</span></td>
+        `;
+        
+        if (hasDetailsCol) {
+            let cellValue = "";
+            if (lower.includes("title tag too short") || lower.includes("title tag too long")) {
+                const titleText = p.title_tag || "None";
+                const titleLen = p.title_tag ? p.title_tag.length : 0;
+                cellValue = `<code>"${escapeHtml(titleText)}"</code> (${titleLen} chars)`;
+            } else if (lower.includes("missing title tag")) {
+                cellValue = `<span class="badge badge-danger">Missing</span>`;
+            } else if (lower.includes("thin content")) {
+                cellValue = `<strong>${p.word_count || 0}</strong> words`;
+            } else if (lower.includes("meta description too short") || lower.includes("meta description too long")) {
+                const metaText = p.meta_description || "None";
+                const metaLen = p.meta_description ? p.meta_description.length : 0;
+                cellValue = `<code>"${escapeHtml(metaText)}"</code> (${metaLen} chars)`;
+            } else if (lower.includes("missing meta description")) {
+                cellValue = `<span class="badge badge-danger">Missing</span>`;
+            } else if (lower.includes("missing alt tags")) {
+                const imgs = p.details?.images || { total: 0, missing_alts_count: 0, missing_alts: [] };
+                const listItems = (imgs.missing_alts || []).map(src => `<li style="margin-top:4px;" class="word-break"><code>${escapeHtml(src)}</code></li>`).join("");
+                cellValue = `
+                    <strong>${imgs.missing_alts_count}</strong> images missing alt
+                    ${listItems ? `<ul class="bullet-list" style="margin-left: 15px; margin-top: 5px; font-size: 11px; list-style-type: disc;">${listItems}</ul>` : ""}
+                `;
+            } else if (lower.includes("missing canonical tag")) {
+                cellValue = `<span class="badge badge-danger">Missing</span>`;
+            } else if (lower.includes("canonical mismatch")) {
+                cellValue = `Expected canonical: <code class="word-break">${escapeHtml(p.canonical_url || "None")}</code>`;
+            } else if (lower.includes("missing h1 header")) {
+                cellValue = `<span class="badge badge-danger">Missing</span>`;
+            } else if (lower.includes("multiple h1 headers")) {
+                const h1s = (p.details?.header_hierarchy || [])
+                    .filter(h => Array.isArray(h) && (h[0] === 'h1' || h[0]?.toLowerCase() === 'h1'))
+                    .map(h => `<li><code>"${escapeHtml(h[1])}"</code></li>`)
+                    .join("");
+                cellValue = h1s 
+                    ? `<ul class="bullet-list" style="margin-left: 15px; font-size: 11px; list-style-type: disc;">${h1s}</ul>`
+                    : `<code>First: "${escapeHtml(p.h1_tag || "None")}"</code>`;
+            } else if (lower.includes("hierarchy jump")) {
+                const violations = (p.issues || []).filter(iss => iss.toLowerCase().includes("hierarchy jump"));
+                cellValue = violations.length > 0 
+                    ? `<ul class="bullet-list" style="margin-left: 15px; font-size: 11px; list-style-type: disc;">${violations.map(v => `<li><code>${escapeHtml(v)}</code></li>`).join("")}</ul>`
+                    : `<span class="badge badge-warning">Heading hierarchy jump detected</span>`;
+            } else if (lower.includes("high js rendering reliance")) {
+                cellValue = `<span class="badge badge-warning">High JS reliance</span>`;
+            } else if (lower.includes("malformed schema markup")) {
+                cellValue = `<span class="badge badge-danger">Malformed JSON-LD</span>`;
+            } else if (lower.includes("redundant taxonomy page")) {
+                cellValue = `<span class="badge badge-warning">Category/Archive page</span>`;
+            } else if (lower.includes("broken")) {
+                const refs = p.details?.incoming_links || [];
+                const listItems = refs.map(ref => `<li style="margin-top:4px;" class="word-break"><a href="${escapeHtml(ref)}" target="_blank" class="link-primary" onclick="event.stopPropagation();">${escapeHtml(ref)}</a></li>`).join("");
+                cellValue = listItems 
+                    ? `<ul class="bullet-list" style="margin-left: 15px; font-size: 11px; list-style-type: disc;">${listItems}</ul>`
+                    : `<span class="text-muted">None (Direct / Seed URL)</span>`;
+            } else if (lower.includes("http error") || lower.includes("network") || lower.includes("failure")) {
+                cellValue = `<span class="badge badge-danger">${escapeHtml(p.status_code ? 'HTTP ' + p.status_code : 'Connection Failed')}</span>`;
+            } else {
+                cellValue = `<span class="badge badge-info">Warning details</span>`;
+            }
+            rowHtml += `<td>${cellValue}</td>`;
+        }
+        
+        rowHtml += `
+                <td><button class="btn btn-xs btn-primary" onclick="event.stopPropagation(); triggerReaudit(${p.id})">Reaudit</button></td>
+            </tr>
+        `;
+        return rowHtml;
+    }).join("");
+
+    return headerHtml + bodyHtml + `</tbody></table>`;
+}
+
+function exportIssueToCSV(issueName, severity) {
+    const issue = groupedIssues[severity][issueName];
+    if (!issue) return;
+    
+    let csv = "URL,Status Code\n";
+    issue.pages.forEach(p => {
+        csv += `"${p.url}",${p.status_code}\n`;
+    });
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${issueName.replace(/\s+/g, '_')}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+}
+
+function renderIssuesTabList() {
+    const container = document.getElementById("issues-accordion-container");
+    if (!container) return;
+    
+    let html = "";
+    
+    const severities = activeIssuesSeverityFilter === "all" 
+        ? ["errors", "warnings", "notices"] 
+        : [activeIssuesSeverityFilter];
+        
+    let matchesFound = false;
+    
+    severities.forEach(sev => {
+        const issues = Object.values(groupedIssues[sev] || {});
+        issues.forEach(iss => {
+            if (!matchCategoryFilter(iss.name, activeIssuesCategoryFilter)) return;
+            
+            matchesFound = true;
+            const label = sev === "errors" ? "Error" : sev === "warnings" ? "Warning" : "Notice";
+            const badgeClass = sev === 'errors' ? 'badge-danger' : sev === 'warnings' ? 'badge-warning' : 'badge-success';
+            
+            const lensExpl = getLensExplanation(iss.name, currentAudienceLens);
+            const toolRec = getIssueToolRecommendation(iss.name);
+            const tableHtml = generateIssueTableHtml(iss.name, iss.pages);
+            
+            let toolBtnHtml = "";
+            if (toolRec) {
+                const encodedUrl = encodeURIComponent(iss.pages[0]?.url || "");
+                toolBtnHtml = `<a href="#/tools/${toolRec.id}?url=${encodedUrl}" class="btn btn-sm btn-primary">Fix with ${toolRec.name}</a>`;
+            }
+
+            html += `
+                <div class="finding-card card">
+                    <div class="finding-card-header" onclick="this.parentElement.classList.toggle('expanded')">
+                        <div class="finding-card-title-row">
+                            <span class="badge ${badgeClass}">${label}</span>
+                            <h3 class="finding-card-title">${escapeHtml(iss.name)}</h3>
+                        </div>
+                        <div class="finding-card-meta">
+                            <span class="affected-count">${iss.pages.length} pages affected</span>
+                            <span class="expand-icon" style="margin-left: 10px;">▼</span>
+                        </div>
+                    </div>
+                    <div class="finding-card-body">
+                        <div class="lens-explanation" style="margin-bottom: 15px; font-size: 0.95em; color: var(--text-secondary);">${escapeHtml(lensExpl)}</div>
+                        <div class="finding-card-actions" style="margin-bottom: 15px; display: flex; gap: 10px;">
+                            ${toolBtnHtml}
+                            <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); exportIssueToCSV('${escapeHtml(iss.name).replace(/'/g, "\'")}', '${sev}')">Export CSV</button>
+                        </div>
+                        <div class="finding-card-details table-container" onclick="event.stopPropagation();">
+                            ${tableHtml}
+                        </div>
+                    </div>
+                </div>
             `;
-            return rowHtml;
-        }).join("");
+        });
+    });
+    
+    if (!matchesFound) {
+        container.innerHTML = `<div class="empty-state">No matching issues found.</div>`;
+    } else {
+        container.innerHTML = html;
     }
 }
 

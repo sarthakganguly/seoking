@@ -118,7 +118,7 @@ async def optimize_keyword_content(user_id: int, keyword: str) -> dict:
         return {"error": "No competitor URLs could be extracted from SERP."}
 
     # Step 3: Scrape competitor pages concurrently
-    concurrency_limit = int(get_user_setting(user_id, "max_concurrent_crawler_tabs", "3"))
+    concurrency_limit = int(await get_user_setting(user_id, "max_concurrent_crawler_tabs", "3"))
     semaphore = asyncio.Semaphore(concurrency_limit)
     
     async def bound_scrape(url):

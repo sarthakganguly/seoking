@@ -1034,3 +1034,54 @@ async def audit_local_seo(data: LocalSeoReq, user_id: int = Depends(get_current_
         return respond(score, mismatches)
     except Exception as e:
         return respond(0, [f"Error fetching URL: {str(e)}"])
+
+class RedirectGeneratorReq(BaseModel):
+    source_url: str
+    destination_url: str
+    redirect_type: str = "301"
+
+@router.post("/redirect-generator")
+def generate_redirect_code(data: RedirectGeneratorReq, user_id: int = Depends(get_current_user)):
+    """12.20 Server-Side Redirect Code Generator"""
+    import urllib.parse
+    
+    source = data.source_url.strip()
+    if not source.startswith("/"):
+        source = f"/{source}"
+        
+    dest = data.destination_url.strip()
+    rtype = data.redirect_type.strip()
+    if rtype not in ("301", "302"):
+        rtype = "301"
+
+    # Apache mod_alias
+    mod_alias = f"Redirect {rtype} {source} {dest}"
+    
+    # Apache mod_rewrite
+    status_flag = "R=301" if rtype == "301" else "R=302"
+    source_regex = "^" + urllib.parse.quote(source[1:]) + "/?$" if source != "/" else "^$"
+    mod_rewrite = (
+        "RewriteEngine On\n"
+        f"RewriteRule {source_regex} {dest} [{status_flag},L]"
+    )
+    
+    # NGINX
+    nginx_type = "permanent" if rtype == "301" else "redirect"
+    nginx = (
+        f"location = {source} {{\n"
+        f"    return {rtype} {dest};\n"
+        f"}}"
+    )
+    
+    content = (
+        f"--- Apache (.htaccess / httpd.conf) using mod_alias ---\n{mod_alias}\n\n"
+        f"--- Apache (.htaccess / httpd.conf) using mod_rewrite ---\n{mod_rewrite}\n\n"
+        f"--- NGINX (nginx.conf) ---\n{nginx}\n"
+    )
+    
+    return {
+        "message": "Redirect Configuration Generated",
+        "status": "COMPLETED",
+        "filename": "redirect_config.txt",
+        "content": content
+    }
