@@ -60,6 +60,8 @@ async def apply_human_jitter(user_id: int):
     """
     jitter_min = int(await get_user_setting(user_id, "jitter_min_ms", "3000"))
     jitter_max = int(await get_user_setting(user_id, "jitter_max_ms", "8000"))
+    if jitter_min > jitter_max:
+        jitter_min, jitter_max = jitter_max, jitter_min
     delay = random.randint(jitter_min, jitter_max) / 1000.0
     logger.info(f"Applying human jitter delay of {delay:.2f}s")
     await asyncio.sleep(delay)

@@ -29,7 +29,7 @@ def hash_string(plain_text: str, salt: str = None) -> str:
         'sha256',
         plain_text.encode('utf-8'),
         salt.encode('utf-8'),
-        100000
+        600000
     )
     return f"{salt}${dk.hex()}"
 
@@ -54,6 +54,11 @@ async def register_user(username: str, password_plain: str) -> tuple[str, str]:
     Generates a secure recovery code.
     Returns: (recovery_code_plain, error_message)
     """
+    if not username or len(username) < 3:
+        return "", "Username must be at least 3 characters long"
+    if not password_plain or len(password_plain) < 8 or len(password_plain) > 128:
+        return "", "Password must be between 8 and 128 characters"
+
     conn = await get_db_connection()
     cursor = await conn.cursor()
     try:
@@ -145,10 +150,11 @@ async def create_session(user_id: int) -> str:
     Creates a new session and returns the session token.
     """
     session_token = secrets.token_hex(32)
+    session_token_hash = hashlib.sha256(session_token.encode('utf-8')).hexdigest()
     conn = await get_db_connection()
     cursor = await conn.cursor()
     try:
-        await cursor.execute("INSERT INTO user_sessions (session_token, user_id) VALUES (?, ?)", (session_token, user_id))
+        await cursor.execute("INSERT INTO user_sessions (session_token, user_id) VALUES (?, ?)", (session_token_hash, user_id))
         await conn.commit()
         logger.info(f"Created session for user_id: {user_id}")
         return session_token
@@ -163,10 +169,13 @@ async def get_user_from_session(session_token: str) -> int | None:
     """
     Resolves a session token to a user ID.
     """
+    if not session_token:
+        return None
+    session_token_hash = hashlib.sha256(session_token.encode('utf-8')).hexdigest()
     conn = await get_db_connection()
     cursor = await conn.cursor()
     try:
-        await cursor.execute("SELECT user_id FROM user_sessions WHERE session_token = ?", (session_token,))
+        await cursor.execute("SELECT user_id FROM user_sessions WHERE session_token = ?", (session_token_hash,))
         row = await cursor.fetchone()
         return row["user_id"] if row else None
     except Exception as e:
@@ -179,10 +188,13 @@ async def delete_session(session_token: str):
     """
     Invalidates a session token.
     """
+    if not session_token:
+        return
+    session_token_hash = hashlib.sha256(session_token.encode('utf-8')).hexdigest()
     conn = await get_db_connection()
     cursor = await conn.cursor()
     try:
-        await cursor.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
+        await cursor.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token_hash,))
         await conn.commit()
         logger.info("Session deleted successfully.")
     except Exception as e:

@@ -70,7 +70,7 @@ def extract_rank_position(serp_html: str, target_domain: str) -> tuple[int | Non
     res = extract_ranks(serp_html, target_domain, [])
     return res["target"]["rank"], res["target"]["url"]
 
-async def check_keyword_rank(user_id: int, kw_id: int, keyword: str, target_domain: str) -> bool:
+async def check_keyword_rank(user_id: int, kw_id: int, keyword: str, target_domain: str, competitors_json: str = None) -> bool:
     """
     Scrapes Google SERP, extracts rank, and saves history.
     """
@@ -81,20 +81,27 @@ async def check_keyword_rank(user_id: int, kw_id: int, keyword: str, target_doma
         
         # Step 2: Retrieve competitors
         competitors = []
-        conn = await get_db_connection()
-        cursor = await conn.cursor()
-        try:
-            await cursor.execute("SELECT competitors_json FROM tracked_keywords WHERE id = ?", (kw_id,))
-            row = await cursor.fetchone()
-            if row and row["competitors_json"]:
+        if competitors_json is not None:
+            if competitors_json:
                 try:
-                    competitors = json.loads(row["competitors_json"])
+                    competitors = json.loads(competitors_json)
                 except json.JSONDecodeError:
                     pass
-        except Exception as e:
-            logger.error(f"Error retrieving competitors for {keyword}: {e}")
-        finally:
-            await conn.close()
+        else:
+            conn = await get_db_connection()
+            cursor = await conn.cursor()
+            try:
+                await cursor.execute("SELECT competitors_json FROM tracked_keywords WHERE id = ?", (kw_id,))
+                row = await cursor.fetchone()
+                if row and row["competitors_json"]:
+                    try:
+                        competitors = json.loads(row["competitors_json"])
+                    except json.JSONDecodeError:
+                        pass
+            except Exception as e:
+                logger.error(f"Error retrieving competitors for {keyword}: {e}")
+            finally:
+                await conn.close()
 
         # Step 3: Extract ranks
         res = extract_ranks(serp_html, target_domain, competitors)
@@ -139,12 +146,17 @@ async def run_scheduled_rank_tracker(user_id: int, force_check: bool = False):
     conn = await get_db_connection()
     cursor = await conn.cursor()
     try:
-        # Fetch keywords
+        # Fetch keywords and last checked time
         await cursor.execute(
             """
-            SELECT id, keyword, target_domain, target_geolocation, target_locale 
-            FROM tracked_keywords 
-            WHERE user_id = ?
+            SELECT 
+                k.id, k.keyword, k.target_domain, k.target_geolocation, 
+                k.target_locale, k.competitors_json,
+                MAX(h.checked_at) as last_checked_at
+            FROM tracked_keywords k
+            LEFT JOIN keyword_rank_history h ON k.id = h.tracked_keyword_id
+            WHERE k.user_id = ?
+            GROUP BY k.id
             """,
             (user_id,)
         )
@@ -157,23 +169,15 @@ async def run_scheduled_rank_tracker(user_id: int, force_check: bool = False):
         for kw in keywords:
             kw_id = kw["id"]
             
-            # Check if updated in the last 20 hours (to allow daily run)
-            await cursor.execute(
-                """
-                SELECT checked_at FROM keyword_rank_history 
-                WHERE tracked_keyword_id = ? 
-                ORDER BY checked_at DESC LIMIT 1
-                """,
-                (kw_id,)
-            )
-            history = await cursor.fetchone()
-            
             should_run = True
-            if history and history["checked_at"]:
-                last_checked = datetime.strptime(history["checked_at"], "%Y-%m-%d %H:%M:%S")
+            if kw["last_checked_at"]:
+                last_checked = datetime.strptime(kw["last_checked_at"], "%Y-%m-%d %H:%M:%S")
                 hours_since = (datetime.utcnow() - last_checked).total_seconds() / 3600
                 if hours_since < 20:
                     should_run = False
+            
+            if force_check:
+                should_run = True
             
             if should_run:
                 # Add jitter delay between queries to avoid getting blocked
@@ -186,7 +190,8 @@ async def run_scheduled_rank_tracker(user_id: int, force_check: bool = False):
                     user_id,
                     kw_id, 
                     kw["keyword"], 
-                    kw["target_domain"]
+                    kw["target_domain"],
+                    kw["competitors_json"]
                 )
     except Exception as e:
         logger.error(f"Error in run_scheduled_rank_tracker: {e}")
@@ -195,15 +200,23 @@ async def run_scheduled_rank_tracker(user_id: int, force_check: bool = False):
         TRACKING_JOBS["active"] = False
         logger.info("Rank tracker job completed.")
 
-async def start_background_tracker(user_id: int):
+async def start_background_tracker():
     """
     Starts an infinite loops running rank updates every 4 hours.
     """
     logger.info("Starting background Rank Tracker loop daemon...")
     while True:
         try:
-            # Check if there are keywords and updates are required
-            await run_scheduled_rank_tracker(user_id, force_check=False)
+            conn = await get_db_connection()
+            cursor = await conn.cursor()
+            try:
+                await cursor.execute("SELECT id FROM users")
+                users = await cursor.fetchall()
+            finally:
+                await conn.close()
+                
+            for user in users:
+                await run_scheduled_rank_tracker(user["id"], force_check=False)
         except Exception as e:
             logger.error(f"Error in background Rank Tracker daemon: {e}")
         # Sleep for 4 hours

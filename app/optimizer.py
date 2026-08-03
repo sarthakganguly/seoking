@@ -113,7 +113,7 @@ async def optimize_keyword_content(user_id: int, keyword: str) -> dict:
     serp_html = await scrape_google_serp(user_id, keyword)
     
     # Step 2: Extract URLs
-    competitor_urls = extract_competitor_urls(serp_html, count=10)
+    competitor_urls = await asyncio.to_thread(extract_competitor_urls, serp_html, 10)
     if not competitor_urls:
         return {"error": "No competitor URLs could be extracted from SERP."}
 
@@ -122,10 +122,9 @@ async def optimize_keyword_content(user_id: int, keyword: str) -> dict:
     semaphore = asyncio.Semaphore(concurrency_limit)
     
     async def bound_scrape(url):
+        await asyncio.sleep(1.0)
         async with semaphore:
             try:
-                # Add delay between scrapes to avoid bans
-                await asyncio.sleep(1.0)
                 html = await scrape_url(user_id, url)
                 return clean_html_content(html)
             except Exception as e:
@@ -143,7 +142,7 @@ async def optimize_keyword_content(user_id: int, keyword: str) -> dict:
         return {"error": "Failed to extract content from any competitor pages."}
         
     # Step 5: Extract Entities
-    recommended_entities = extract_entities_and_terms(aggregated_text, top_n=40)
+    recommended_entities = await asyncio.to_thread(extract_entities_and_terms, aggregated_text, 40)
     
     logger.info(f"Content optimization pipeline finished. Extracted {len(recommended_entities)} terms.")
     return {

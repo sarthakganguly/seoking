@@ -2,6 +2,11 @@ import os
 import json
 import logging
 import asyncio
+import urllib.parse
+import ipaddress
+import urllib.request
+import time
+from bs4 import BeautifulSoup
 from fastapi import FastAPI, Cookie, HTTPException, Depends, status, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -21,6 +26,26 @@ from app.tools import router as tools_router
 
 logger = logging.getLogger("seoking.main")
 
+def validate_ssrf(url_or_domain: str):
+    if not url_or_domain.startswith("http://") and not url_or_domain.startswith("https://"):
+        parsed = urllib.parse.urlparse("http://" + url_or_domain)
+    else:
+        parsed = urllib.parse.urlparse(url_or_domain)
+        
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(status_code=400, detail="Invalid URL or domain")
+        
+    if hostname in ["localhost", "127.0.0.1", "::1"]:
+        raise HTTPException(status_code=400, detail="Localhost/private IPs are not allowed")
+        
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
+            raise HTTPException(status_code=400, detail="Private IPs are not allowed")
+    except ValueError:
+        pass
+
 app = FastAPI(title="SEO King", version="1.0.0")
 app.include_router(tools_router)
 
@@ -35,8 +60,7 @@ async def startup_event():
     scraper.async_broadcast_callback = broadcast_ws_message
     
     # Run rank tracking daemon in background (every 4 hours, starts checking)
-    # Default to user_id 1 (since it's a single-user system)
-    asyncio.create_task(start_background_tracker(user_id=1))
+    asyncio.create_task(start_background_tracker())
     logger.info("Application startup processes completed.")
 
 async def broadcast_ws_message(data: dict):
@@ -201,6 +225,7 @@ async def api_save_settings(data: SettingsReq, user_id: int = Depends(get_curren
 
 @app.post("/api/audit/start")
 async def api_start_audit(data: AuditStartReq, user_id: int = Depends(get_current_user)):
+    validate_ssrf(data.domain)
     run_id = await start_crawl_job(user_id, data.domain, data.max_depth)
     if not run_id:
         raise HTTPException(status_code=500, detail="Failed to initialize crawl audit run.")
@@ -481,9 +506,6 @@ async def api_compare_audit_runs(
 
 @app.post("/api/audit/page/{page_id}/reaudit")
 async def api_reaudit_page(page_id: int, user_id: int = Depends(get_current_user)):
-    import urllib.request
-    import urllib.parse
-    from bs4 import BeautifulSoup
     from app.crawler import AuditCrawler, is_bot_blocked_robots_txt
     
     conn = await get_db_connection()
@@ -528,53 +550,63 @@ async def api_reaudit_page(page_id: int, user_id: int = Depends(get_current_user
             headers={'User-Agent': 'Mozilla/5.0 SEOKingBot/1.0'}
         )
         
-        import time
-        start_time = time.time()
-        try:
-            response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)
-            load_time = time.time() - start_time
-            status_code = response.status
+        def fetch_and_parse_page():
+            start_time = time.time()
+            try:
+                response = urllib.request.urlopen(req, timeout=10)
+                l_time = time.time() - start_time
+                s_code = response.status
+                
+                f_url = response.geturl()
+                c_type = response.headers.get('Content-Type', '')
+                
+                parsed_data = {}
+                out_links = []
+                scripts_c = 0
+                css_c = 0
+                
+                if 'text/html' in c_type:
+                    html_c = response.read()
+                    parsed_data = crawler.analyze_page_seo(url, s_code, dict(response.headers), html_c)
+                    
+                    soup = BeautifulSoup(html_c, 'html.parser')
+                    for a in soup.find_all('a', href=True):
+                        href = a.get('href', '').strip()
+                        if href and not href.startswith(('#', 'javascript:', 'mailto:', 'tel:')):
+                            abs_href = urllib.parse.urljoin(url, href)
+                            out_links.append(abs_href)
+                    
+                    scripts_c = len([s.get('src') for s in soup.find_all('script') if s.get('src')])
+                    css_c = len([l.get('href') for l in soup.find_all('link', rel='stylesheet') if l.get('href')])
+                
+                return l_time, s_code, f_url, parsed_data, list(set(out_links)), scripts_c, css_c
+            except Exception as e:
+                return time.time() - start_time, 0, url, {}, [], 0, 0
+
+        load_time, status_code, final_url, parsed, outgoing_links, scripts_count, css_count = await asyncio.to_thread(fetch_and_parse_page)
+        
+        if final_url != url:
+            has_redirect = True
+            redirect_url = final_url
             
-            final_url = response.geturl()
-            if final_url != url:
-                has_redirect = True
-                redirect_url = final_url
+        if parsed:
+            title = parsed.get("title")
+            meta_desc = parsed.get("meta_desc")
+            h1 = parsed.get("h1")
+            is_broken = parsed.get("is_broken", False)
+            canonical_url = parsed.get("canonical")
+            is_noindex = parsed.get("is_noindex", False)
+            word_count = parsed.get("word_count", 0)
+            issues = parsed.get("issues", [])
+            details = parsed.get("details", {})
             
-            content_type = response.headers.get('Content-Type', '')
-            if 'text/html' in content_type:
-                html_content = response.read()
-                parsed = crawler.analyze_page_seo(url, status_code, dict(response.headers), html_content)
-                title = parsed.get("title")
-                meta_desc = parsed.get("meta_desc")
-                h1 = parsed.get("h1")
-                is_broken = parsed.get("is_broken", False)
-                canonical_url = parsed.get("canonical")
-                is_noindex = parsed.get("is_noindex", False)
-                word_count = parsed.get("word_count", 0)
-                issues = parsed.get("issues", [])
-                details = parsed.get("details", {})
-                
-                soup = BeautifulSoup(html_content, 'html.parser')
-                
-                outgoing = []
-                for a in soup.find_all('a', href=True):
-                    href = a.get('href', '').strip()
-                    if href and not href.startswith(('#', 'javascript:', 'mailto:', 'tel:')):
-                        abs_href = urllib.parse.urljoin(url, href)
-                        outgoing.append(abs_href)
-                details["outgoing_links"] = list(set(outgoing))
-                
-                scripts = [s.get('src') for s in soup.find_all('script') if s.get('src')]
-                css = [l.get('href') for l in soup.find_all('link', rel='stylesheet') if l.get('href')]
-                details["js_count"] = len(scripts)
-                details["css_count"] = len(css)
-            else:
-                details["depth"] = row["depth"] if "depth" in row else 0
-                details["load_time"] = round(load_time, 3)
-                details["outgoing_links"] = []
-        except Exception as e:
-            load_time = time.time() - start_time
-            status_code = 0
+            details["outgoing_links"] = outgoing_links
+            details["js_count"] = scripts_count
+            details["css_count"] = css_count
+        else:
+            details["depth"] = row["depth"] if "depth" in row else 0
+            details["load_time"] = round(load_time, 3)
+            details["outgoing_links"] = []
             is_broken = True
             issues = ["Crawl Execution Failure"]
             details["depth"] = 0
@@ -639,13 +671,6 @@ async def api_delete_audit(run_id: int, user_id: int = Depends(get_current_user)
     cursor = await conn.cursor()
     try:
         await cursor.execute("DELETE FROM audit_runs WHERE id = ? AND user_id = ?", (run_id, user_id))
-        
-        # Reset AUTOINCREMENT sequence to current max ID
-        await cursor.execute("SELECT MAX(id) FROM audit_runs")
-        max_id_row = await cursor.fetchone()
-        max_id = max_id_row[0] if max_id_row and max_id_row[0] is not None else 0
-        await cursor.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'audit_runs'", (max_id,))
-        
         await conn.commit()
         return {"message": "Audit run deleted successfully."}
     except Exception as e:
@@ -658,6 +683,7 @@ async def api_delete_audit(run_id: int, user_id: int = Depends(get_current_user)
 
 @app.post("/api/performance/start")
 async def api_start_performance_audit(data: PerformanceStartReq, user_id: int = Depends(get_current_user)):
+    validate_ssrf(data.url)
     conn = await get_db_connection()
     cursor = await conn.cursor()
     run_id = None
@@ -728,13 +754,6 @@ async def api_delete_performance_run(run_id: int, user_id: int = Depends(get_cur
     cursor = await conn.cursor()
     try:
         await cursor.execute("DELETE FROM performance_audits WHERE id = ? AND user_id = ?", (run_id, user_id))
-        
-        # Reset AUTOINCREMENT sequence to current max ID
-        await cursor.execute("SELECT MAX(id) FROM performance_audits")
-        max_id_row = await cursor.fetchone()
-        max_id = max_id_row[0] if max_id_row and max_id_row[0] is not None else 0
-        await cursor.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'performance_audits'", (max_id,))
-        
         await conn.commit()
         return {"message": "Performance run deleted successfully."}
     except Exception as e:
@@ -899,29 +918,41 @@ async def api_analyze_content(data: OptimizeReq, user_id: int = Depends(get_curr
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    session_id = websocket.cookies.get("session_id")
+    if not session_id:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+        
+    user = await get_user_from_session(session_id)
+    if not user:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     await websocket.accept()
     CONNECTED_WEBSOCKETS.add(websocket)
-    logger.info("New WebSocket client connected.")
+    logger.info(f"New WebSocket client connected (User ID: {user['id']}).")
     try:
         while True:
             # Keep connection alive, listen for any messages from client (none expected in current design)
             data = await websocket.receive_text()
             # If client sends a resume action, can handle it (optional, url check handles it automatically)
     except WebSocketDisconnect:
-        logger.info("WebSocket client disconnected.")
+        logger.info(f"WebSocket client disconnected (User ID: {user['id']}).")
     finally:
         if websocket in CONNECTED_WEBSOCKETS:
             CONNECTED_WEBSOCKETS.remove(websocket)
 
 # ----------------- STATIC INTERFACE SERVING -----------------
 
+import pathlib
+STATIC_DIR = pathlib.Path(__file__).parent / "static"
+
 # Mount the static files directory to serve CSS and JS
-# Mounts the actual absolute folder directory /app/app/static
-app.mount("/static", StaticFiles(directory="/app/app/static"), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/")
 def serve_dashboard():
-    return FileResponse("/app/app/static/index.html")
+    return FileResponse(str(STATIC_DIR / "index.html"))
 
 # Fallback client-side routes
 @app.get("/{catchall:path}")
@@ -929,4 +960,4 @@ def serve_dashboard_catchall(catchall: str):
     # Ensure api routes still return 404 and don't route to HTML
     if catchall.startswith("api/"):
         raise HTTPException(status_code=404, detail="API endpoint not found.")
-    return FileResponse("/app/app/static/index.html")
+    return FileResponse(str(STATIC_DIR / "index.html"))
