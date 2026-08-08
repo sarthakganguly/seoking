@@ -192,15 +192,24 @@ async function submitTool(id, endpoint) {
 
         if (data.audit_checks && Array.isArray(data.audit_checks)) {
             html += `
-                <div style="margin-bottom:12px; border:1px solid #30363d; border-radius:6px; overflow:hidden;">
-                    <div style="background:#161b22; padding:8px 12px; border-bottom:1px solid #30363d; font-size:0.85em; font-weight:600; color:#8b949e;">Technical Compliance Checks</div>
-                    <table class="table" style="margin:0; font-size:0.85em;">
+                <div style="margin-bottom:12px; border:1px solid var(--border-color); border-radius:6px; overflow:hidden;">
+                    <div style="background:var(--card-bg); padding:10px 14px; border-bottom:1px solid var(--border-color); font-size:0.9em; font-weight:700; color:var(--text-primary);">Technical Compliance Checks</div>
+                    <table class="table" style="margin:0; font-size:0.9em;">
                         <tbody>
                             ${data.audit_checks.map(c => `
-                                <tr>
-                                    <td style="width:30px; text-align:center;">${c.passed ? '<span style="color:#38d9a9;">✓</span>' : '<span style="color:#f85149;">✗</span>'}</td>
-                                    <td><strong>${escapeHTML(c.requirement)}</strong></td>
-                                    <td style="color:var(--text-muted);">${escapeHTML(c.details)}</td>
+                                <tr style="border-bottom:1px solid var(--border-color);">
+                                    <td style="width:40px; text-align:center; font-size:1.2em;">${c.passed ? '<span style="color:var(--success-color);">✓</span>' : '<span style="color:var(--danger-color);">✗</span>'}</td>
+                                    <td style="padding:10px 8px;">
+                                        <div style="font-weight:600; color:var(--text-primary); margin-bottom:3px;">${escapeHTML(c.requirement)}</div>
+                                        <div style="font-size:0.88em; color:var(--text-secondary);">${escapeHTML(c.details)}</div>
+                                    </td>
+                                    <td style="width:70px; text-align:center;">
+                                        <span style="display:inline-block; padding:3px 10px; border-radius:12px; font-size:0.8em; font-weight:600;
+                                            background:${c.passed ? 'rgba(16,185,129,0.15)' : 'rgba(248,81,73,0.15)'};
+                                            color:${c.passed ? 'var(--success-color)' : 'var(--danger-color)'};">
+                                            ${c.passed ? 'PASS' : 'FAIL'}
+                                        </span>
+                                    </td>
                                 </tr>
                             `).join('')}
                         </tbody>

@@ -150,7 +150,7 @@ async def api_login(data: LoginReq, response: Response):
         key="session_token",
         value=session_token,
         httponly=True,
-        secure=True,
+        secure=False,
         samesite="lax",
         max_age=3600 * 24 * 7  # 7 days
     )
@@ -293,7 +293,7 @@ async def api_get_audit_details(
         # Get count of matching records
         count_query = f"SELECT COUNT(*) FROM audit_pages WHERE {where_clause}"
         await cursor.execute(count_query, params)
-        total_items = await cursor.fetchone()[0]
+        total_items = (await cursor.fetchone())[0]
         
         # Calculate pagination offsets
         import math
@@ -308,13 +308,13 @@ async def api_get_audit_details(
         
         # Also fetch summary metrics for the whole run
         await cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ?", (run_id,))
-        overall_total = await cursor.fetchone()[0]
+        overall_total = (await cursor.fetchone())[0]
         await cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ? AND is_broken = 1", (run_id,))
-        overall_broken = await cursor.fetchone()[0]
+        overall_broken = (await cursor.fetchone())[0]
         await cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ? AND has_redirect = 1", (run_id,))
-        overall_redirect = await cursor.fetchone()[0]
+        overall_redirect = (await cursor.fetchone())[0]
         await cursor.execute("SELECT COUNT(*) FROM audit_pages WHERE audit_run_id = ? AND status_code >= 200 AND status_code < 300 AND is_broken = 0", (run_id,))
-        overall_healthy = await cursor.fetchone()[0]
+        overall_healthy = (await cursor.fetchone())[0]
         
         # Parse json fields for run
         run_dict = dict(run)
@@ -918,26 +918,26 @@ async def api_analyze_content(data: OptimizeReq, user_id: int = Depends(get_curr
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    session_id = websocket.cookies.get("session_id")
-    if not session_id:
+    session_token = websocket.cookies.get("session_token")
+    if not session_token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
         
-    user = await get_user_from_session(session_id)
-    if not user:
+    user_id = await get_user_from_session(session_token)
+    if not user_id:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     await websocket.accept()
     CONNECTED_WEBSOCKETS.add(websocket)
-    logger.info(f"New WebSocket client connected (User ID: {user['id']}).")
+    logger.info(f"New WebSocket client connected (User ID: {user_id}).")
     try:
         while True:
             # Keep connection alive, listen for any messages from client (none expected in current design)
             data = await websocket.receive_text()
             # If client sends a resume action, can handle it (optional, url check handles it automatically)
     except WebSocketDisconnect:
-        logger.info(f"WebSocket client disconnected (User ID: {user['id']}).")
+        logger.info(f"WebSocket client disconnected (User ID: {user_id}).")
     finally:
         if websocket in CONNECTED_WEBSOCKETS:
             CONNECTED_WEBSOCKETS.remove(websocket)

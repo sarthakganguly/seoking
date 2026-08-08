@@ -18,7 +18,7 @@ logger = logging.getLogger("seoking.crawler")
 from app.crawler.utils import *
 
 class AuditCrawler:
-    async def __init__(self, user_id: int, run_id: int, domain: str, max_depth: int):
+    def __init__(self, user_id: int, run_id: int, domain: str, max_depth: int):
         self.user_id = user_id
         self.run_id = run_id
         self.domain = domain
@@ -29,10 +29,7 @@ class AuditCrawler:
         self.visited = set()
         self.crawled_count = 0
         self.sitemap_urls = set()
-        
-        # Concurrency limit from user settings
-        concurrency = int(await get_user_setting(user_id, "max_concurrent_crawler_tabs", "3"))
-        self.semaphore = asyncio.Semaphore(min(max(concurrency, 1), 5))
+        self.semaphore = None
         
         # Run-wide checklist metadata
         self.run_details = {
@@ -49,6 +46,10 @@ class AuditCrawler:
         Starts the crawl: audits robots.txt/sitemaps, crawls pages recursively,
         discovers and audits orphan pages, and completes the run.
         """
+        # Concurrency limit from user settings
+        concurrency = int(await get_user_setting(self.user_id, "max_concurrent_crawler_tabs", "3"))
+        self.semaphore = asyncio.Semaphore(min(max(concurrency, 1), 5))
+        
         logger.info(f"Starting rigorous crawl for domain {self.domain} (run_id: {self.run_id})")
         
         # Step 1: Scan robots.txt and fetch XML Sitemaps
@@ -144,7 +145,7 @@ class AuditCrawler:
         sitemap_seeds = []
         
         try:
-            req = urllib.request.Request(robots_url, headers={'User-Agent': 'Mozilla/5.0 SEOKingBot/1.0'})
+            req = urllib.request.Request(robots_url, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'})
             response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=8)
             self.run_details["has_robots_txt"] = True
             self.run_details["robots_txt_status"] = response.status
@@ -181,7 +182,7 @@ class AuditCrawler:
             sitemaps_fetched.append(s_url)
             
             try:
-                req = urllib.request.Request(s_url, headers={'User-Agent': 'Mozilla/5.0 SEOKingBot/1.0'})
+                req = urllib.request.Request(s_url, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'})
                 response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=8)
                 if response.status == 200:
                     self.run_details["sitemaps_found"].append(s_url)
@@ -213,7 +214,7 @@ class AuditCrawler:
                 continue
                 
             try:
-                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 SEOKingBot/1.0'})
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'})
                 # Fast HEAD check
                 req.get_method = lambda: 'HEAD'
                 response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=5)
@@ -685,7 +686,7 @@ class AuditCrawler:
             import time
             req = urllib.request.Request(
                 url, 
-                headers={'User-Agent': 'Mozilla/5.0 SEOKingBot/1.0'}
+                headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'}
             )
             
             start_time = time.time()
@@ -726,7 +727,7 @@ class AuditCrawler:
                         
                     # Execute rigorous audits
                     response_headers = dict(response.headers)
-                    audit_res = self.analyze_page_seo(url, status_code, response_headers, html_content)
+                    audit_res = await self.analyze_page_seo(url, status_code, response_headers, html_content)
                     canonical_url = audit_res["canonical_url"]
                     is_noindex = audit_res["is_noindex"]
                     word_count = audit_res["word_count"]

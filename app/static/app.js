@@ -266,6 +266,15 @@ function setTheme(theme) {
         sunIcon.classList.remove("hidden");
         moonIcon.classList.add("hidden");
     }
+
+    // Apply custom colors if they exist in settings
+    if (currentSettings) {
+        if (currentSettings.primary_color) document.documentElement.style.setProperty('--primary-color', currentSettings.primary_color);
+        if (currentSettings.success_color) document.documentElement.style.setProperty('--success-color', currentSettings.success_color);
+        if (currentSettings.warning_color) document.documentElement.style.setProperty('--warning-color', currentSettings.warning_color);
+        if (currentSettings.danger_color) document.documentElement.style.setProperty('--danger-color', currentSettings.danger_color);
+        if (currentSettings.indigo_color) document.documentElement.style.setProperty('--indigo-color', currentSettings.indigo_color);
+    }
 }
 
 // ----------------- CORE VIEWS SWAPPER -----------------
@@ -441,6 +450,13 @@ async function loadSettingsToForm() {
     document.getElementById("pref-locale").value = currentSettings.locale || "en-US";
     document.getElementById("pref-timezone").value = currentSettings.timezone || "America/Los_Angeles";
     document.getElementById("pref-audit-limit").value = currentSettings.audit_pagination_limit || "100";
+    
+    // Load custom colors (with fallbacks to defaults)
+    document.getElementById("pref-primary-color").value = currentSettings.primary_color || "#10b981";
+    document.getElementById("pref-success-color").value = currentSettings.success_color || "#10b981";
+    document.getElementById("pref-warning-color").value = currentSettings.warning_color || "#d97706";
+    document.getElementById("pref-danger-color").value = currentSettings.danger_color || "#ef4444";
+    document.getElementById("pref-indigo-color").value = currentSettings.indigo_color || "#0ea5e9";
 }
 
 async function handleSaveSettings(e) {
@@ -456,15 +472,31 @@ async function handleSaveSettings(e) {
         locale: document.getElementById("pref-locale").value,
         timezone: document.getElementById("pref-timezone").value,
         audit_pagination_limit: document.getElementById("pref-audit-limit").value,
+        primary_color: document.getElementById("pref-primary-color").value,
+        success_color: document.getElementById("pref-success-color").value,
+        warning_color: document.getElementById("pref-warning-color").value,
+        danger_color: document.getElementById("pref-danger-color").value,
+        indigo_color: document.getElementById("pref-indigo-color").value,
     };
 
     const success = await saveSettingsPayload(payload);
     if (success) {
+        currentSettings = { ...currentSettings, ...payload };
         setTheme(payload.theme);
         const msg = document.getElementById("settings-status-msg");
         msg.classList.remove("hidden");
         setTimeout(() => msg.classList.add("hidden"), 3000);
     }
+}
+
+function resetColorsToDefault() {
+    document.getElementById("pref-primary-color").value = "#10b981";
+    document.getElementById("pref-success-color").value = "#10b981";
+    document.getElementById("pref-warning-color").value = "#d97706";
+    document.getElementById("pref-danger-color").value = "#ef4444";
+    document.getElementById("pref-indigo-color").value = "#0ea5e9";
+    // Trigger save so they are instantly applied
+    document.getElementById("settings-form").dispatchEvent(new Event("submit"));
 }
 
 async function saveSettingsPayload(settings) {
@@ -971,11 +1003,34 @@ function renderOverviewTopIssues() {
     }
     
     listEl.innerHTML = list.slice(0, 5).map(iss => `
-        <li class="top-issue-item ${iss.type}" onclick="switchAuditTab('issues'); showSingleIssueDetails('${iss.sev}', '${escapeHtml(iss.name)}')">
+        <li class="top-issue-item ${iss.type}" onclick="switchAuditTab('issues'); showSingleIssueDetails('${iss.sev}', '${escapeHtml(iss.name).replace(/'/g, "\\'")}')">
             <span class="issue-name">${escapeHtml(iss.name)}</span>
             <span class="issue-count">${iss.pages.length} pages</span>
         </li>
     `).join("");
+}
+
+function showSingleIssueDetails(severity, issueName) {
+    // Wait a tick for the issues tab to render
+    setTimeout(() => {
+        const container = document.getElementById("issues-accordion-container");
+        if (!container) return;
+
+        const cards = container.querySelectorAll(".finding-card");
+        for (const card of cards) {
+            const titleEl = card.querySelector(".finding-card-title");
+            if (titleEl && titleEl.textContent.trim() === issueName) {
+                // Expand the matching card
+                card.classList.add("expanded");
+                // Scroll it into view
+                card.scrollIntoView({ behavior: "smooth", block: "start" });
+                // Brief highlight effect
+                card.style.outline = "2px solid var(--accent-color)";
+                setTimeout(() => { card.style.outline = ""; }, 2000);
+                return;
+            }
+        }
+    }, 100);
 }
 
 function drawRing(id, score) {
@@ -1418,6 +1473,29 @@ function renderSitemapsStructureTable() {
             <td>XML Sitemap Index / List</td>
         </tr>
     `).join("");
+}
+
+function getCategoryFromIssueName(name) {
+    const n = name.toLowerCase();
+    if (n.includes("blocked") && (n.includes("ai") || n.includes("bot") || n.includes("agent"))) return "AI Search";
+    if (n.includes("crawl") || n.includes("robots") || n.includes("noindex") || n.includes("sitemap") || n.includes("orphan") || n.includes("redirect") || n.includes("404") || n.includes("broken") || n.includes("soft 404") || n.includes("network")) return "Crawlability";
+    if (n.includes("title") || n.includes("meta description") || n.includes("canonical") || n.includes("hreflang") || n.includes("og:") || n.includes("twitter:")) return "Meta tags";
+    if (n.includes("content") || n.includes("word") || n.includes("thin") || n.includes("h1") || n.includes("header") || n.includes("alt") || n.includes("anchor") || n.includes("author") || n.includes("e-e-a-t") || n.includes("clickbait") || n.includes("explicit") || n.includes("schema") || n.includes("breadcrumb") || n.includes("taxonomy") || n.includes("js render") || n.includes("js depend")) return "Content";
+    if (n.includes("ssl") || n.includes("https") || n.includes("http error") || n.includes("performance") || n.includes("load") || n.includes("script") || n.includes("third-party")) return "Performance";
+    return "Other";
+}
+
+function matchCategoryFilter(issueName, filterCategory) {
+    if (filterCategory === "all") return true;
+    const cat = getCategoryFromIssueName(issueName);
+    const mapping = {
+        "ai": "AI Search",
+        "crawl": "Crawlability",
+        "content": "Content",
+        "meta": "Meta tags",
+        "performance": "Performance"
+    };
+    return cat === (mapping[filterCategory] || filterCategory);
 }
 
 function renderIssuesCategoryChips() {

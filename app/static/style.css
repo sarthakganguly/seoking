@@ -1462,12 +1462,12 @@ svg#history-svg-chart {
     text-align: center;
 }
 
-.tree-badge.level-1 { background-color: #d97706; }
-.tree-badge.level-2 { background-color: #10b981; }
-.tree-badge.level-3 { background-color: #059669; }
-.tree-badge.level-4 { background-color: #0ea5e9; }
-.tree-badge.level-5 { background-color: #4b5563; }
-.tree-badge.level-6 { background-color: #6b7280; }
+.tree-badge.level-1 { background-color: var(--warning-color); }
+.tree-badge.level-2 { background-color: var(--success-color); }
+.tree-badge.level-3 { background-color: var(--primary-hover); }
+.tree-badge.level-4 { background-color: var(--indigo-color); }
+.tree-badge.level-5 { background-color: var(--text-muted); }
+.tree-badge.level-6 { background-color: var(--text-secondary); }
 
 .tree-text {
     font-size: 0.8rem;
@@ -2663,11 +2663,12 @@ html[data-lens="developer"] .lens-explanation {
 .tool-result {
     margin-top: 15px;
     padding: 10px;
-    background-color: #1e1e1e;
-    color: #00ff00;
-    font-family: monospace;
-    font-size: 0.85rem;
-    border-radius: 4px;
+    background-color: var(--card-bg);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.9rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
     white-space: pre-wrap;
     word-break: break-all;
 }

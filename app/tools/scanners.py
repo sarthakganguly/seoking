@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 import urllib.request
 import asyncio
+import re
 from app.auth import get_current_user
 from app.scraper import scrape_url, audit_mobile_rendering
 from app.crawler import AuditCrawler
