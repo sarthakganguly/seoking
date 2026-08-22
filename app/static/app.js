@@ -731,6 +731,15 @@ async function loadAuditDetails(runId, page = 1) {
     currentOpenAuditRunId = runId;
     currentAuditPage = page;
     
+    // Immediately show container and loading state
+    const container = document.getElementById("audit-detail-container");
+    const loader = document.getElementById("audit-detail-loader");
+    container.classList.remove("hidden");
+    if (loader) loader.classList.remove("hidden");
+    
+    // Provide immediate scroll feedback
+    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    
     try {
         // Read search and filter values from DOM
         const q = document.getElementById("audit-page-search").value;
@@ -749,7 +758,9 @@ async function loadAuditDetails(runId, page = 1) {
         const data = await response.json();
         console.log("[SEO King] Fetched audit details data:", data);
         
-        document.getElementById("audit-detail-container").classList.remove("hidden");
+        // Hide loader now that data is ready
+        if (loader) loader.classList.add("hidden");
+        
         document.getElementById("audit-detail-domain").innerText = data.run.domain;
         
         const statusEl = document.getElementById("audit-detail-status");
@@ -910,6 +921,9 @@ async function loadAuditDetails(runId, page = 1) {
         document.getElementById("audit-pg-next").disabled = (data.current_page === data.total_pages);
     } catch (e) {
         console.error("[SEO King] Failed to load audit details:", e);
+    } finally {
+        const loader = document.getElementById("audit-detail-loader");
+        if (loader) loader.classList.add("hidden");
     }
 }
 
@@ -1253,22 +1267,15 @@ function openThemeReport(theme) {
                 <div class="table-container">
                     <table>
                         <thead>
-                            <tr>
-                                <th>URL</th>
-                                <th>Load Time</th>
-                                <th>JS files</th>
-                                <th>CSS files</th>
+                            <tr style="cursor: pointer; user-select: none;">
+                                <th onclick="sortPerformanceTable('url')">URL <span id="perf-sort-url" class="perf-sort-icon"></span></th>
+                                <th onclick="sortPerformanceTable('load_time')">Load Time <span id="perf-sort-load_time" class="perf-sort-icon"> ▼</span></th>
+                                <th onclick="sortPerformanceTable('js_count')">JS files <span id="perf-sort-js_count" class="perf-sort-icon"></span></th>
+                                <th onclick="sortPerformanceTable('css_count')">CSS files <span id="perf-sort-css_count" class="perf-sort-icon"></span></th>
                             </tr>
                         </thead>
-                        <tbody>
-                            ${allPagesCached.map(p => `
-                                <tr>
-                                    <td><strong class="word-break">${escapeHtml(p.url)}</strong></td>
-                                    <td><span class="${(p.details.load_time || 0.5) > 1.5 ? 'text-danger font-semibold' : ''}">${p.details.load_time || 0.5}s</span></td>
-                                    <td>${p.details.js_count || 0}</td>
-                                    <td>${p.details.css_count || 0}</td>
-                                </tr>
-                            `).join("")}
+                        <tbody id="performance-table-body">
+                            ${renderPerformanceTableBody()}
                         </tbody>
                     </table>
                 </div>
@@ -1360,6 +1367,57 @@ function openThemeReport(theme) {
     bodyEl.innerHTML = body;
 }
 
+let currentPerformanceSort = { column: 'load_time', desc: true };
+
+function renderPerformanceTableBody() {
+    let pages = [...allPagesCached];
+    pages.sort((a, b) => {
+        let valA, valB;
+        if (currentPerformanceSort.column === 'url') {
+            valA = a.url; valB = b.url;
+        } else if (currentPerformanceSort.column === 'load_time') {
+            valA = a.details && a.details.load_time !== undefined ? a.details.load_time : 0.5;
+            valB = b.details && b.details.load_time !== undefined ? b.details.load_time : 0.5;
+        } else if (currentPerformanceSort.column === 'js_count') {
+            valA = a.details && a.details.js_count !== undefined ? a.details.js_count : 0;
+            valB = b.details && b.details.js_count !== undefined ? b.details.js_count : 0;
+        } else if (currentPerformanceSort.column === 'css_count') {
+            valA = a.details && a.details.css_count !== undefined ? a.details.css_count : 0;
+            valB = b.details && b.details.css_count !== undefined ? b.details.css_count : 0;
+        }
+        
+        if (valA < valB) return currentPerformanceSort.desc ? 1 : -1;
+        if (valA > valB) return currentPerformanceSort.desc ? -1 : 1;
+        return 0;
+    });
+    
+    return pages.map(p => `
+        <tr>
+            <td><strong class="word-break">${escapeHtml(p.url)}</strong></td>
+            <td><span class="${(p.details && p.details.load_time || 0.5) > 1.5 ? 'text-danger font-semibold' : ''}">${p.details && p.details.load_time || 0.5}s</span></td>
+            <td>${p.details && p.details.js_count || 0}</td>
+            <td>${p.details && p.details.css_count || 0}</td>
+        </tr>
+    `).join("");
+}
+
+window.sortPerformanceTable = function(column) {
+    if (currentPerformanceSort.column === column) {
+        currentPerformanceSort.desc = !currentPerformanceSort.desc;
+    } else {
+        currentPerformanceSort.column = column;
+        currentPerformanceSort.desc = (column !== 'url');
+    }
+    
+    const tbody = document.getElementById('performance-table-body');
+    if (tbody) {
+        tbody.innerHTML = renderPerformanceTableBody();
+        document.querySelectorAll('.perf-sort-icon').forEach(el => el.innerHTML = '');
+        const icon = document.getElementById(`perf-sort-${column}`);
+        if (icon) icon.innerHTML = currentPerformanceSort.desc ? ' ▼' : ' ▲';
+    }
+}
+
 function closeThematicReport() {
     const overlay = document.getElementById("thematic-report-overlay");
     if (overlay) {
@@ -1400,14 +1458,21 @@ function switchAuditTab(tabName) {
     });
     
     // Perform actions when tab is selected
-    if (tabName === "issues") {
-        goBackToIssuesList();
-        renderIssuesTabList();
-    } else if (tabName === "compare") {
-        populateCompareRuns();
-    } else if (tabName === "statistics") {
-        switchStatsMode(activeStatsMode);
-    }
+    const loader = document.getElementById("audit-detail-loader");
+    if (loader) loader.classList.remove("hidden");
+    
+    setTimeout(() => {
+        if (tabName === "issues") {
+            goBackToIssuesList();
+            renderIssuesTabList();
+        } else if (tabName === "compare") {
+            populateCompareRuns();
+        } else if (tabName === "statistics") {
+            switchStatsMode(activeStatsMode);
+        }
+        
+        if (loader) loader.classList.add("hidden");
+    }, 50);
 }
 
 function switchPagesSubtab(subtabName) {

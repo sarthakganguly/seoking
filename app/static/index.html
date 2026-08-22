@@ -296,7 +296,15 @@
 
                     <!-- Audit Detail View -->
                     <!-- Audit Detail View (High Fidelity Tabbed Layout) -->
-                    <div id="audit-detail-container" class="card hidden">
+                    <div id="audit-detail-container" class="card hidden" style="position: relative; min-height: 400px;">
+                        
+                        <!-- Loading Overlay -->
+                        <div id="audit-detail-loader" class="loading-overlay hidden">
+                            <div class="spinner"></div>
+                            <div style="margin-top: 20px; font-weight: 500; font-size: 1.1rem; color: var(--text-primary);">Loading Audit Report...</div>
+                            <div style="margin-top: 8px; font-size: 0.9rem; color: var(--text-secondary);">Analyzing metadata, metrics, and content</div>
+                        </div>
+
                         <div class="detail-header">
                             <div>
                                 <h2 id="audit-detail-domain">domain.com</h2>
