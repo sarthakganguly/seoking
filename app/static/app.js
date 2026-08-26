@@ -1051,6 +1051,7 @@ function drawRing(id, score) {
     const ringEl = document.getElementById(id);
     const textEl = document.getElementById(id + "-text");
     if (ringEl && textEl) {
+        ringEl.classList.remove("ring-loading");
         ringEl.setAttribute("stroke-dasharray", `${score}, 100`);
         textEl.innerText = `${score}%`;
         

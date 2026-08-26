@@ -46,6 +46,15 @@ def validate_ssrf(url_or_domain: str):
     except ValueError:
         pass
 
+
+def parse_json_field(data_dict, key, default):
+    if key in data_dict and data_dict[key]:
+        try:
+            return json.loads(data_dict[key])
+        except Exception:
+            return default
+    return default
+
 app = FastAPI(title="SEO King", version="1.0.0")
 app.include_router(tools_router)
 
@@ -330,21 +339,8 @@ async def api_get_audit_details(
         pages_list = []
         for p in pages:
             p_dict = dict(p)
-            if "issues_json" in p_dict and p_dict["issues_json"]:
-                try:
-                    p_dict["issues"] = json.loads(p_dict["issues_json"])
-                except Exception:
-                    p_dict["issues"] = []
-            else:
-                p_dict["issues"] = []
-                
-            if "details_json" in p_dict and p_dict["details_json"]:
-                try:
-                    p_dict["details"] = json.loads(p_dict["details_json"])
-                except Exception:
-                    p_dict["details"] = {}
-            else:
-                p_dict["details"] = {}
+            p_dict["issues"] = parse_json_field(p_dict, "issues_json", [])
+            p_dict["details"] = parse_json_field(p_dict, "details_json", {})
             pages_list.append(p_dict)
             
         return {
@@ -379,21 +375,8 @@ async def api_get_all_audit_pages(run_id: int, user_id: int = Depends(get_curren
         pages_list = []
         for p in pages:
             p_dict = dict(p)
-            if "issues_json" in p_dict and p_dict["issues_json"]:
-                try:
-                    p_dict["issues"] = json.loads(p_dict["issues_json"])
-                except Exception:
-                    p_dict["issues"] = []
-            else:
-                p_dict["issues"] = []
-                
-            if "details_json" in p_dict and p_dict["details_json"]:
-                try:
-                    p_dict["details"] = json.loads(p_dict["details_json"])
-                except Exception:
-                    p_dict["details"] = {}
-            else:
-                p_dict["details"] = {}
+            p_dict["issues"] = parse_json_field(p_dict, "issues_json", [])
+            p_dict["details"] = parse_json_field(p_dict, "details_json", {})
             pages_list.append(p_dict)
             
         return {
@@ -454,10 +437,7 @@ async def api_compare_audit_runs(
             notices = 0
             
             for p in pages:
-                try:
-                    issues = json.loads(p["issues_json"]) if p["issues_json"] else []
-                except Exception:
-                    issues = []
+                issues = parse_json_field(dict(p), "issues_json", [])
                 for issue in issues:
                     issue_lower = issue.lower()
                     if "broken" in issue_lower or "error" in issue_lower or "failure" in issue_lower:
@@ -550,40 +530,43 @@ async def api_reaudit_page(page_id: int, user_id: int = Depends(get_current_user
             headers={'User-Agent': 'Mozilla/5.0 SEOKingBot/1.0'}
         )
         
-        def fetch_and_parse_page():
-            start_time = time.time()
-            try:
-                response = urllib.request.urlopen(req, timeout=10)
-                l_time = time.time() - start_time
-                s_code = response.status
+        start_time = time.time()
+        try:
+            response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)
+            load_time = time.time() - start_time
+            status_code = response.status
+            final_url = response.geturl()
+            c_type = response.headers.get('Content-Type', '')
+            
+            parsed = {}
+            outgoing_links = []
+            scripts_count = 0
+            css_count = 0
+            
+            if 'text/html' in c_type:
+                html_c = await asyncio.to_thread(response.read)
+                parsed = await crawler.analyze_page_seo(url, status_code, dict(response.headers), html_c)
                 
-                f_url = response.geturl()
-                c_type = response.headers.get('Content-Type', '')
-                
-                parsed_data = {}
-                out_links = []
-                scripts_c = 0
-                css_c = 0
-                
-                if 'text/html' in c_type:
-                    html_c = response.read()
-                    parsed_data = crawler.analyze_page_seo(url, s_code, dict(response.headers), html_c)
-                    
+                def parse_html():
                     soup = BeautifulSoup(html_c, 'html.parser')
+                    out_links = []
                     for a in soup.find_all('a', href=True):
                         href = a.get('href', '').strip()
                         if href and not href.startswith(('#', 'javascript:', 'mailto:', 'tel:')):
-                            abs_href = urllib.parse.urljoin(url, href)
-                            out_links.append(abs_href)
-                    
-                    scripts_c = len([s.get('src') for s in soup.find_all('script') if s.get('src')])
-                    css_c = len([l.get('href') for l in soup.find_all('link', rel='stylesheet') if l.get('href')])
+                            out_links.append(urllib.parse.urljoin(url, href))
+                    s_c = len([s.get('src') for s in soup.find_all('script') if s.get('src')])
+                    c_c = len([l.get('href') for l in soup.find_all('link', rel='stylesheet') if l.get('href')])
+                    return list(set(out_links)), s_c, c_c
                 
-                return l_time, s_code, f_url, parsed_data, list(set(out_links)), scripts_c, css_c
-            except Exception as e:
-                return time.time() - start_time, 0, url, {}, [], 0, 0
-
-        load_time, status_code, final_url, parsed, outgoing_links, scripts_count, css_count = await asyncio.to_thread(fetch_and_parse_page)
+                outgoing_links, scripts_count, css_count = await asyncio.to_thread(parse_html)
+        except Exception:
+            load_time = time.time() - start_time
+            status_code = 0
+            final_url = url
+            parsed = {}
+            outgoing_links = []
+            scripts_count = 0
+            css_count = 0
         
         if final_url != url:
             has_redirect = True
@@ -822,21 +805,8 @@ async def api_get_keywords(user_id: int = Depends(get_current_user)):
         res = []
         for row in rows:
             d = dict(row)
-            if d.get("competitors_json"):
-                try:
-                    d["competitors"] = json.loads(d["competitors_json"])
-                except Exception:
-                    d["competitors"] = []
-            else:
-                d["competitors"] = []
-                
-            if d.get("competitor_ranks_json"):
-                try:
-                    d["competitor_ranks"] = json.loads(d["competitor_ranks_json"])
-                except Exception:
-                    d["competitor_ranks"] = {}
-            else:
-                d["competitor_ranks"] = {}
+            d["competitors"] = parse_json_field(d, "competitors_json", [])
+            d["competitor_ranks"] = parse_json_field(d, "competitor_ranks_json", {})
             res.append(d)
         return res
     finally:
@@ -861,13 +831,7 @@ async def api_get_keyword_history(kw_id: int, user_id: int = Depends(get_current
         res = []
         for row in rows:
             d = dict(row)
-            if d.get("competitor_ranks_json"):
-                try:
-                    d["competitor_ranks"] = json.loads(d["competitor_ranks_json"])
-                except Exception:
-                    d["competitor_ranks"] = {}
-            else:
-                d["competitor_ranks"] = {}
+            d["competitor_ranks"] = parse_json_field(d, "competitor_ranks_json", {})
             res.append(d)
         return res
     finally:

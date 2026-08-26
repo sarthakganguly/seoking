@@ -271,83 +271,10 @@ class AuditCrawler:
                     if out_url in incoming_links_map:
                         incoming_links_map[out_url].append(p["url"])
             
-            # Simple PageRank (ILR)
-            pr = {p["url"]: 1.0 / N for p in pages}
-            d = 0.85
+            ilr_scores = self.compute_pagerank(pages, incoming_links_map, outgoing_links_map)
             
-            for _ in range(10):
-                new_pr = {}
-                dangling_weight = sum(pr[p["url"]] for p in pages if not outgoing_links_map[p["url"]]) / N
-                
-                for p in pages:
-                    url = p["url"]
-                    sum_links = 0.0
-                    for incoming_url in incoming_links_map[url]:
-                        out_count = len(outgoing_links_map[incoming_url])
-                        if out_count > 0:
-                            sum_links += pr[incoming_url] / out_count
-                    
-                    new_pr[url] = ((1 - d) / N) + d * (sum_links + dangling_weight)
-                pr = new_pr
-                
-            # Normalize PageRank to 1-100 scale
-            pr_vals = list(pr.values())
-            min_pr = min(pr_vals) if pr_vals else 0.0
-            max_pr = max(pr_vals) if pr_vals else 1.0
-            pr_range = max_pr - min_pr
-            
-            ilr_scores = {}
-            for url, val in pr.items():
-                if pr_range > 0:
-                    ilr_scores[url] = int(10 + (val - min_pr) / pr_range * 90)
-                else:
-                    ilr_scores[url] = 100
-            
-            # 3. Check AI robots blocking
-            robots_txt_content = self.run_details.get("robots_txt_content", "")
-            ai_bots = ["ChatGPT-User", "OAI-SearchBot", "Googlebot", "Google-Extended"]
-            
-            ai_blocked_counts = {bot: 0 for bot in ai_bots}
-            total_ai_checks = len(pages) * len(ai_bots)
-            blocked_ai_checks = 0
-            
-            # Update each page
-            for p in pages:
-                url = p["url"]
-                parsed_url = urllib.parse.urlparse(url)
-                url_path = parsed_url.path or "/"
-                
-                blocked_bots = []
-                for bot in ai_bots:
-                    is_blocked = is_bot_blocked_robots_txt(robots_txt_content, url_path, bot)
-                    if is_blocked:
-                        blocked_bots.append(bot)
-                        ai_blocked_counts[bot] += 1
-                        blocked_ai_checks += 1
-                
-                # Update details with post-crawl calculations
-                p["details"]["incoming_links"] = incoming_links_map[url]
-                p["details"]["incoming_links_count"] = len(incoming_links_map[url])
-                p["details"]["ilr"] = ilr_scores[url]
-                p["details"]["blocked_ai_bots"] = blocked_bots
-                p["details"]["ssl_valid"] = ssl_details.get("valid", False) if url.startswith("https") else False
-                
-                # Add notices / warnings for specific issues shown in screenshots
-                if blocked_bots and "Blocked from crawling by AI agents" not in p["issues"]:
-                    p["issues"].append("Blocked from crawling by AI agents")
-                
-                # Save page changes
-                await cursor.execute(
-                    "UPDATE audit_pages SET issues_json = ?, details_json = ? WHERE id = ?",
-                    (json.dumps(p["issues"]), json.dumps(p["details"]), p["id"])
-                )
-                
-            # Update top-level run details
-            ai_search_health = int(((total_ai_checks - blocked_ai_checks) / total_ai_checks) * 100) if total_ai_checks > 0 else 100
-            
-            self.run_details["ai_search_health"] = ai_search_health
-            self.run_details["ai_blocked_counts"] = ai_blocked_counts
-            self.run_details["ssl_details"] = ssl_details
+            # 3. Check AI robots blocking and update pages
+            await self._update_pages_with_calculations(cursor, pages, incoming_links_map, ilr_scores, ssl_details)
             
             await conn.commit()
         except Exception as e:
@@ -656,6 +583,78 @@ class AuditCrawler:
                 "has_author": has_author
             }
         }
+
+
+    def compute_pagerank(self, pages, incoming_links_map, outgoing_links_map):
+        N = len(pages)
+        pr = {p["url"]: 1.0 / N for p in pages}
+        d = 0.85
+        for _ in range(10):
+            new_pr = {}
+            dangling_weight = sum(pr[p["url"]] for p in pages if not outgoing_links_map[p["url"]]) / N
+            for p in pages:
+                url = p["url"]
+                sum_links = 0.0
+                for incoming_url in incoming_links_map[url]:
+                    out_count = len(outgoing_links_map[incoming_url])
+                    if out_count > 0:
+                        sum_links += pr[incoming_url] / out_count
+                new_pr[url] = ((1 - d) / N) + d * (sum_links + dangling_weight)
+            pr = new_pr
+            
+        pr_vals = list(pr.values())
+        min_pr = min(pr_vals) if pr_vals else 0.0
+        max_pr = max(pr_vals) if pr_vals else 1.0
+        pr_range = max_pr - min_pr
+        
+        ilr_scores = {}
+        for url, val in pr.items():
+            if pr_range > 0:
+                ilr_scores[url] = int(10 + (val - min_pr) / pr_range * 90)
+            else:
+                ilr_scores[url] = 100
+        return ilr_scores
+
+
+    async def _update_pages_with_calculations(self, cursor, pages, incoming_links_map, ilr_scores, ssl_details):
+        robots_txt_content = self.run_details.get("robots_txt_content", "")
+        ai_bots = ["ChatGPT-User", "OAI-SearchBot", "Googlebot", "Google-Extended"]
+        
+        ai_blocked_counts = {bot: 0 for bot in ai_bots}
+        total_ai_checks = len(pages) * len(ai_bots)
+        blocked_ai_checks = 0
+        
+        for p in pages:
+            url = p["url"]
+            parsed_url = urllib.parse.urlparse(url)
+            url_path = parsed_url.path or "/"
+            
+            blocked_bots = []
+            for bot in ai_bots:
+                is_blocked = is_bot_blocked_robots_txt(robots_txt_content, url_path, bot)
+                if is_blocked:
+                    blocked_bots.append(bot)
+                    ai_blocked_counts[bot] += 1
+                    blocked_ai_checks += 1
+            
+            p["details"]["incoming_links"] = incoming_links_map[url]
+            p["details"]["incoming_links_count"] = len(incoming_links_map[url])
+            p["details"]["ilr"] = ilr_scores[url]
+            p["details"]["blocked_ai_bots"] = blocked_bots
+            p["details"]["ssl_valid"] = ssl_details.get("valid", False) if url.startswith("https") else False
+            
+            if blocked_bots and "Blocked from crawling by AI agents" not in p["issues"]:
+                p["issues"].append("Blocked from crawling by AI agents")
+            
+            await cursor.execute(
+                "UPDATE audit_pages SET issues_json = ?, details_json = ? WHERE id = ?",
+                (json.dumps(p["issues"]), json.dumps(p["details"]), p["id"])
+            )
+            
+        ai_search_health = int(((total_ai_checks - blocked_ai_checks) / total_ai_checks) * 100) if total_ai_checks > 0 else 100
+        self.run_details["ai_search_health"] = ai_search_health
+        self.run_details["ai_blocked_counts"] = ai_blocked_counts
+        self.run_details["ssl_details"] = ssl_details
 
     async def process_page(self, url: str, depth: int) -> tuple[list[str], int]:
         """

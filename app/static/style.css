@@ -2699,3 +2699,14 @@ html[data-lens="developer"] .lens-explanation {
     display: flex;
     justify-content: space-between;
 }
+
+@keyframes pulse-ring {
+    0% { opacity: 0.5; stroke: #e2e8f0; }
+    50% { opacity: 1; stroke: #cbd5e1; }
+    100% { opacity: 0.5; stroke: #e2e8f0; }
+}
+
+.ring-loading {
+    animation: pulse-ring 1.5s infinite ease-in-out;
+    stroke-dasharray: 100, 100 !important;
+}
