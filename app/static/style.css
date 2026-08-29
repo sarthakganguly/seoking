@@ -421,22 +421,56 @@ h1, h2, h3, h4 {
 .lens-toggle-container {
     display: flex;
     align-items: center;
-    background-color: var(--bg-primary);
+    background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 2px 6px;
+    border-radius: 20px;
+    padding: 0 12px;
+    gap: 4px;
+    transition: all var(--transition-fast);
+    position: relative;
+    height: 32px;
+}
+
+.lens-toggle-container:hover {
+    border-color: var(--primary-color);
+    background-color: var(--input-bg);
+}
+
+.lens-icon {
+    color: var(--text-secondary);
+    flex-shrink: 0;
 }
 
 .lens-select {
     background: transparent;
     border: none;
     color: var(--text-primary);
-    font-size: 0.85rem;
-    font-weight: 500;
-    padding: 4px 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 4px 20px 4px 4px;
     outline: none;
     cursor: pointer;
     font-family: var(--font-body);
+    appearance: none;
+    -webkit-appearance: none;
+    width: auto;
+}
+
+.select-chevron {
+    position: absolute;
+    right: 10px;
+    pointer-events: none;
+    color: var(--text-secondary);
+    transition: transform var(--transition-fast);
+}
+
+.lens-toggle-container:focus-within {
+    box-shadow: 0 0 0 2px var(--primary-light);
+    border-color: var(--primary-color);
+}
+
+.lens-toggle-container:focus-within .select-chevron {
+    transform: rotate(180deg);
 }
 
 .lens-select option {

@@ -547,14 +547,37 @@ async function loadDashboardMetrics() {
         const latestCompleted = runs.find(r => r.status === "completed");
         if (latestCompleted) {
             try {
-                const limit = parseInt(currentSettings.audit_pagination_limit || "100");
-                const detailRes = await fetch(`/api/audit/run/${latestCompleted.id}?page=1&limit=${limit}&filter_type=all`);
-                const detailData = await detailRes.json();
+                const allPagesRes = await fetch(`/api/audit/run/${latestCompleted.id}/pages/all`);
+                const allPagesData = await allPagesRes.json();
+                
+                // Extract all issues across all pages
+                let allIssues = [];
+                if (allPagesData && allPagesData.pages) {
+                    allPagesData.pages.forEach(p => {
+                        if (p.issues && Array.isArray(p.issues)) {
+                            p.issues.forEach(issName => {
+                                // Determine severity based on issue name keywords
+                                const lower = issName.toLowerCase();
+                                let sev = "warning";
+                                if (lower.includes("broken") || lower.includes("error") || lower.includes("failure") || lower.includes("blocked")) {
+                                    sev = "error";
+                                } else if (lower.includes("missing") || lower.includes("short") || lower.includes("long") || lower.includes("duplicate")) {
+                                    sev = "warning";
+                                } else {
+                                    sev = "notice";
+                                }
+                                allIssues.push({ name: issName, severity: sev });
+                            });
+                        }
+                    });
+                }
+
                 document.getElementById("ledger-last-run").innerText = "Last Audit: " + formatDate(latestCompleted.completed_at || latestCompleted.started_at);
-                renderRiskLedger(detailData.issues);
+                renderRiskLedger(allIssues);
             } catch (e) {
                 console.error("Failed to load latest audit health for dashboard:", e);
                 document.getElementById("dash-site-health").innerText = "--";
+                document.getElementById("risk-ledger-content").innerHTML = `<div class="empty-state">Failed to load risk ledger data.</div>`;
             }
         } else {
             document.getElementById("ledger-last-run").innerText = "No recent audits";
@@ -603,11 +626,12 @@ function renderRiskLedger(issuesList) {
         return;
     }
     
-    // Group issues by category logic similar to getCategoryFromIssueName
+    // Group issues by category matching getCategoryFromIssueName
     const categoryCounts = {
-        "Indexability": { errors: 0, warnings: 0, notices: 0 },
+        "AI Search": { errors: 0, warnings: 0, notices: 0 },
+        "Crawlability": { errors: 0, warnings: 0, notices: 0 },
+        "Meta tags": { errors: 0, warnings: 0, notices: 0 },
         "Content": { errors: 0, warnings: 0, notices: 0 },
-        "Links": { errors: 0, warnings: 0, notices: 0 },
         "Performance": { errors: 0, warnings: 0, notices: 0 },
         "Other": { errors: 0, warnings: 0, notices: 0 }
     };
@@ -620,7 +644,14 @@ function renderRiskLedger(issuesList) {
         else categoryCounts[mappedCat].notices++;
     });
     
-    let html = `<div class="risk-ledger-grid" style="display:flex; flex-direction:column; gap: 12px;">`;
+    let html = `
+        <div class="risk-ledger-legend" style="display: flex; gap: 16px; margin-bottom: 16px; font-size: 0.85rem; color: var(--text-secondary); align-items: center;">
+            <div style="display: flex; align-items: center; gap: 6px;"><span style="width: 10px; height: 10px; background: var(--danger-color); border-radius: 50%;"></span> Errors</div>
+            <div style="display: flex; align-items: center; gap: 6px;"><span style="width: 10px; height: 10px; background: var(--warning-color); border-radius: 50%;"></span> Warnings</div>
+            <div style="display: flex; align-items: center; gap: 6px;"><span style="width: 10px; height: 10px; background: var(--success-color); border-radius: 50%;"></span> Notices</div>
+        </div>
+        <div class="risk-ledger-grid" style="display:flex; flex-direction:column; gap: 16px;">
+    `;
     
     for (const [cat, counts] of Object.entries(categoryCounts)) {
         const total = counts.errors + counts.warnings + counts.notices;
@@ -631,14 +662,21 @@ function renderRiskLedger(issuesList) {
         const notPct = (counts.notices / total) * 100;
         
         html += `
-            <div class="ledger-row" style="display:flex; align-items:center; gap: 15px;">
-                <div style="width: 120px; font-weight: 600; font-size: 0.9em; text-align: right;">${cat}</div>
-                <div style="flex:1; height: 24px; background: #222; border-radius: 4px; overflow: hidden; display: flex;">
+            <div class="ledger-row" style="display: flex; flex-direction: column; gap: 6px; background: var(--card-bg); padding: 12px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm);">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: 600; font-size: 0.95rem; color: var(--text-primary);">${cat}</span>
+                    <div style="display: flex; gap: 10px; font-size: 0.8rem;">
+                        ${counts.errors > 0 ? `<span style="color: var(--danger-color); font-weight: 600;">${counts.errors} Error${counts.errors > 1 ? 's' : ''}</span>` : ''}
+                        ${counts.warnings > 0 ? `<span style="color: var(--warning-color); font-weight: 600;">${counts.warnings} Warning${counts.warnings > 1 ? 's' : ''}</span>` : ''}
+                        ${counts.notices > 0 ? `<span style="color: var(--success-color); font-weight: 600;">${counts.notices} Notice${counts.notices > 1 ? 's' : ''}</span>` : ''}
+                        <span style="color: var(--text-muted); margin-left: 4px;">(${total} total)</span>
+                    </div>
+                </div>
+                <div style="width: 100%; height: 10px; background: var(--bg-secondary); border-radius: 5px; overflow: hidden; display: flex;">
                     ${counts.errors > 0 ? `<div style="width: ${errPct}%; background: var(--danger-color);" title="${counts.errors} Errors"></div>` : ''}
                     ${counts.warnings > 0 ? `<div style="width: ${warnPct}%; background: var(--warning-color);" title="${counts.warnings} Warnings"></div>` : ''}
                     ${counts.notices > 0 ? `<div style="width: ${notPct}%; background: var(--success-color);" title="${counts.notices} Notices"></div>` : ''}
                 </div>
-                <div style="width: 60px; font-size: 0.85em; color: var(--text-muted);">${total} issues</div>
             </div>
         `;
     }
